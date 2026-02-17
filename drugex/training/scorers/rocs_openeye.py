@@ -128,7 +128,7 @@ class OpenEyeROCSScorer(Scorer):
         self.binary_path = binary_path or rocs_binary
         self.timeout = timeout
 
-        if n_jobs != 1:
+        if n_jobs not in (-1, 1):
             warnings.warn(
                 "OpenEye ROCS runs as a single CLI subprocess and does not "
                 "support parallelization. n_jobs is accepted for API "
@@ -250,6 +250,8 @@ class OpenEyeROCSScorer(Scorer):
         result_scores = np.zeros((num_input_mols, len(self.queries)), dtype=np.float32)
         for i, scores in enumerate(scores_dict.values()):
             for unique_idx, score in scores.items():
+                if unique_idx not in unique_to_original:
+                    continue
                 for original_idx in unique_to_original[unique_idx]:
                     result_scores[original_idx, i] = score
 
