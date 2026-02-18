@@ -3,7 +3,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import warnings
 from collections import defaultdict
 from contextlib import contextmanager
 from typing import Dict, List, Tuple, Union
@@ -81,7 +80,6 @@ class OpenEyeROCSScorer(Scorer):
         rocs_binary: str = "rocs",
         binary_path: str | None = None,
         show_progress: bool = True,
-        n_jobs: int = -1,
         timeout: int = 300,
     ):
         """Initialize the OpenEye ROCS scorer.
@@ -102,8 +100,6 @@ class OpenEyeROCSScorer(Scorer):
             rocs_binary: Name of the ROCS binary to use
             binary_path: Path to the ROCS binary (if not in PATH)
             show_progress: If True, progress is shown during scoring
-            n_jobs: Accepted for API consistency with RDKit/CDPKit backends
-                but has no effect (OpenEye ROCS runs as a single CLI subprocess)
             timeout: Timeout in seconds for the ROCS subprocess
 
         Raises:
@@ -127,15 +123,6 @@ class OpenEyeROCSScorer(Scorer):
         self.color_force_field = color_force_field
         self.binary_path = binary_path or rocs_binary
         self.timeout = timeout
-
-        if n_jobs not in (-1, 1):
-            warnings.warn(
-                "OpenEye ROCS runs as a single CLI subprocess and does not "
-                "support parallelization. n_jobs is accepted for API "
-                "consistency with RDKit/CDPKit backends but has no effect.",
-                stacklevel=2,
-            )
-        self.n_jobs = 1
 
         self.shape_only = shape_only
         self.rocs_binary = rocs_binary
