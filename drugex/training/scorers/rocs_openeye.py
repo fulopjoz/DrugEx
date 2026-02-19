@@ -226,9 +226,7 @@ class OpenEyeROCSScorer(Scorer):
 
         # Prepare conformers for unique SMILES only
         with _managed_tmpdir() as tmpdir:
-            conf_file = self.conformer_generator.genConformers(
-                unique_smiles, tmpdir
-            )
+            conf_file = self.conformer_generator.genConformers(unique_smiles, tmpdir)
 
             # Score using OpenEye ROCS
             scores_dict = self._score(conf_file)
@@ -237,8 +235,6 @@ class OpenEyeROCSScorer(Scorer):
         result_scores = np.zeros((num_input_mols, len(self.queries)), dtype=np.float32)
         for i, scores in enumerate(scores_dict.values()):
             for unique_idx, score in scores.items():
-                if unique_idx not in unique_to_original:
-                    continue
                 for original_idx in unique_to_original[unique_idx]:
                     result_scores[original_idx, i] = score
 
@@ -270,7 +266,7 @@ class OpenEyeROCSScorer(Scorer):
         
         if self.shape_only:
             # sets chemff none, optchem false and rankby tanimoto
-            cmd.extend(["-shapeonly", "true"])
+            cmd.extend(["-shapeonly", str(self.shape_only).lower()])
         else:
             cmd.extend(["-rankby", self.score_type])
             cmd.extend(["-chemff", self.color_force_field])
