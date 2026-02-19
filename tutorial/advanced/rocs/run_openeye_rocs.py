@@ -234,15 +234,12 @@ def main() -> None:
     torch.manual_seed(0)
     np.random.seed(0)
 
-    # Define paths (robust to current working directory)
+    # Define paths
     ROOT = Path(__file__).resolve().parent
     CCR2_SDF = ROOT / 'rocs_rl_ccr/rdkit_cdpkit/CCR2_reference_ligands.sdf'
     MODEL_DIR = ROOT / 'demo_out/models'
     OUTPUT_DIR = ROOT / 'rl_runs_demo/openeye_rl'
-    PRETRAINED_DIR = (
-        ROOT.parents[2]
-        / "data/models/pretrained/smiles-rnn/Papyrus05.5_smiles_rnn_PT"
-    )
+    PRETRAINED_DIR = ROOT.parents[2] / "data/models/pretrained/smiles-rnn/Papyrus05.5_smiles_rnn_PT"
 
     FINETUNE_BASE = MODEL_DIR / 'CCR2_finetuned'
     FINETUNE_CHECKPOINT = FINETUNE_BASE.with_suffix('.pkg')
