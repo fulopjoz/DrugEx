@@ -33,17 +33,21 @@ class SequenceRNN(Generator):
     def attachToGPUs(self, gpus):
         """
         This model currently uses only one GPU. Therefore, only the first one from the list will be used.
+        If gpus[0] is -1, the model is moved to CPU (CPU sentinel).
 
         Parameters:
         ----------
         gpus: `tuple`
-            A tuple of GPU indices.
+            A tuple of GPU indices. Use (-1,) to indicate CPU.
         
         Returns:
         -------
         None
         """
-        self.device = torch.device(f'cuda:{gpus[0]}')
+        if gpus[0] == -1:
+            self.device = torch.device('cpu')
+        else:
+            self.device = torch.device(f'cuda:{gpus[0]}')
         self.to(self.device)
         self.gpus = (gpus[0],)
 
