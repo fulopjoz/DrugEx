@@ -314,7 +314,7 @@ class GraphTransformer(FragGenerator):
             The training loss of the epoch
         """
 
-        net = nn.DataParallel(self, device_ids=self.gpus)
+        net = nn.DataParallel(self, device_ids=self.gpus) if self.device.type != 'cpu' else self
         total_steps = len(loader)
         current_step = 0
         for src in tqdm(loader, desc='Iterating over training batches', leave=False):
@@ -360,7 +360,7 @@ class GraphTransformer(FragGenerator):
 
         valid_metrics = {}
         
-        net = nn.DataParallel(self, device_ids=self.gpus)
+        net = nn.DataParallel(self, device_ids=self.gpus) if self.device.type != 'cpu' else self
         pbar = tqdm(loader, desc='Iterating over validation batches', leave=False)
         smiles, frags = self.sample(pbar)
         scores = self.evaluate(smiles, frags, evaluator=evaluator, no_multifrag_smiles=no_multifrag_smiles)
@@ -390,7 +390,7 @@ class GraphTransformer(FragGenerator):
         frags : list
             List of fragments
         """
-        net = nn.DataParallel(self, device_ids=self.gpus)
+        net = nn.DataParallel(self, device_ids=self.gpus) if self.device.type != 'cpu' else self
         frags, smiles = [], []
         with torch.no_grad():              
             for src in loader:
