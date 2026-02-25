@@ -410,7 +410,7 @@ class FragGenerator(Generator):
 
         # Duplicate of self.sample to allow dropping molecules and progress bar on the fly
         # without additional overhead caused by calling nn.DataParallel a few times
-        net = nn.DataParallel(self, device_ids=self.gpus)
+        net = nn.DataParallel(self, device_ids=self.gpus) if self.device.type != 'cpu' else self
 
         if progress:
             tqdm_kwargs.update({'total': num_samples, 'desc': 'Generating molecules'})

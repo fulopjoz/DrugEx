@@ -241,7 +241,7 @@ class FragExplorer(Explorer):
             The average loss of the agent
         """
 
-        net = nn.DataParallel(self.agent, device_ids=self.gpus)
+        net = nn.DataParallel(self.agent, device_ids=self.gpus) if self.device.type != 'cpu' else self.agent
         total_steps = len(loader)
         
         for step_idx, src in enumerate(tqdm(loader, desc='Calculating policy gradient...', leave=False)):
@@ -310,7 +310,7 @@ class FragExplorer(Explorer):
         self.bestState = self.getModel()
 
         n_iters = 1 if self.crover is None else 10
-        net = nn.DataParallel(self, device_ids=self.gpus)
+        net = nn.DataParallel(self, device_ids=self.gpus) if self.device.type != 'cpu' else self
         logger.info(' ')
         
         for it in range(n_iters):
