@@ -21,6 +21,20 @@
 /qspr/
 /tmp/
 tmp*
+
+### CCR2 Project (entire directory — 117GB experiment output)
+/ccr2_gen/
+/pbs_logs_archive/
+
+### Downloaded Data
+/data/
+
+### External Projects
+/skillz/
+
+### Tutorial Generated Outputs
+/tutorial/advanced/rocs/demo_out/
+/tutorial/advanced/rocs/threshold_sweep_results/
 *.pkg
 *.tgz
 *.gzip
