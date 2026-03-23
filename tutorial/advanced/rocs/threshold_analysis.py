@@ -5,6 +5,7 @@ for separating CCR2 active ligands from decoys using ROC analysis.
 """
 
 import os
+import time
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -91,17 +92,20 @@ def load_datasets(
 
 def initialize_scorer(
     references_sdf: str,
+    backend: str = "rdkit",
     max_conformers: Optional[int] = None,
     max_isomers: Optional[int] = None,
     max_heavy_atoms: Optional[int] = None,
     max_rotatable_bonds: Optional[int] = None,
     num_threads: int = 1,
     n_jobs: int = -1,
-) -> RDKitROCSScorer:
-    """Initialize RDKit ROCS scorer.
+    show_progress: bool = False,
+) -> Any:
+    """Initialize a ROCS scorer for the requested backend.
 
     Args:
         references_sdf: Path to reference ligands.
+        backend: Scoring backend (`rdkit`, `cdpkit`, `openeye`).
         max_conformers: Maximum conformers per molecule.
         max_isomers: Maximum stereoisomers to enumerate.
         max_heavy_atoms: Maximum heavy atoms allowed.
@@ -111,10 +115,12 @@ def initialize_scorer(
             0 = use all CPU cores (faster but may conflict with n_jobs>1).
             Set to 0 for maximum speed when using n_jobs=1.
         n_jobs: Number of parallel jobs for scoring (-1 = all CPUs).
+        show_progress: If True, enable backend scorer progress output.
 
     Returns:
-        Configured RDKitROCSScorer instance.
+        Configured scorer instance with a ``getScores`` method.
     """
+    backend_norm = (backend or "rdkit").strip().lower()
     if max_conformers is None:
         max_conformers = MAX_CONFORMERS
     if max_isomers is None:
@@ -124,27 +130,83 @@ def initialize_scorer(
     if max_rotatable_bonds is None:
         max_rotatable_bonds = MAX_ROTATABLE_BONDS
 
-    scorer = RDKitROCSScorer(
-        conformer_generator=RDKitConformerGenerator(
-            max_conformers=max_conformers,
-            max_isomers=max_isomers,
-            max_heavy_atoms=max_heavy_atoms,
-            max_rotatable_bonds=max_rotatable_bonds,
-            num_threads=num_threads,
-            show_progress=False,
-        ),
-        references=str(references_sdf),
-        score_type='TanimotoCombo',
-        use_colors=True,
-        show_progress=False,
-        n_jobs=n_jobs,
-    )
+    if backend_norm == "rdkit":
+        return RDKitROCSScorer(
+            conformer_generator=RDKitConformerGenerator(
+                max_conformers=max_conformers,
+                max_isomers=max_isomers,
+                max_heavy_atoms=max_heavy_atoms,
+                max_rotatable_bonds=max_rotatable_bonds,
+                num_threads=num_threads,
+                show_progress=show_progress,
+            ),
+            references=str(references_sdf),
+            score_type='TanimotoCombo',
+            use_colors=True,
+            show_progress=show_progress,
+            n_jobs=n_jobs,
+        )
 
-    return scorer
+    if backend_norm == "cdpkit":
+        from drugex.training.scorers.conformer_generators import CDPKitConformerGenerator
+        from drugex.training.scorers.rocs_cdpkit import CDPKitROCSScorer
+
+        return CDPKitROCSScorer(
+            conformer_generator=CDPKitConformerGenerator(
+                max_conformers=max_conformers,
+                max_isomers=max_isomers,
+                max_heavy_atoms=max_heavy_atoms,
+                max_rotatable_bonds=max_rotatable_bonds,
+                show_progress=show_progress,
+            ),
+            references=str(references_sdf),
+            show_progress=show_progress,
+            n_jobs=n_jobs,
+        )
+
+    if backend_norm == "openeye":
+        repo_root = Path(__file__).resolve().parents[3]
+        oe_license_file = repo_root / "ccr2_gen/oe_license.txt"
+        if "OE_LICENSE" not in os.environ and oe_license_file.exists():
+            os.environ["OE_LICENSE"] = str(oe_license_file)
+
+        # OpenEye ROCS CLI on some nodes needs an extra runtime library (libpciaccess).
+        runtime_lib_dir = repo_root / "ccr2_gen/oeye/runtime_libs"
+        if runtime_lib_dir.exists():
+            current_ld = os.environ.get("LD_LIBRARY_PATH", "")
+            runtime_prefix = str(runtime_lib_dir)
+            if not current_ld.startswith(runtime_prefix):
+                os.environ["LD_LIBRARY_PATH"] = (
+                    f"{runtime_prefix}:{current_ld}" if current_ld else runtime_prefix
+                )
+
+        from drugex.training.scorers.conformer_generators import OmegaConformerGenerator
+        from drugex.training.scorers.rocs_openeye import OpenEyeROCSScorer
+
+        rocs_wrapper = repo_root / "ccr2_gen/oeye/current_apps/apps/openeye/bin/rocs"
+        if not rocs_wrapper.exists():
+            rocs_wrapper = Path("rocs")
+
+        return OpenEyeROCSScorer(
+            conformer_generator=OmegaConformerGenerator(
+                max_conformers=max_conformers,
+                max_centers=max_isomers,
+                max_heavy_atoms=max_heavy_atoms,
+                max_rotatable_bonds=max_rotatable_bonds,
+                show_progress=show_progress,
+            ),
+            references={"reference": str(references_sdf)},
+            score_type="TanimotoCombo",
+            rocs_binary="rocs",
+            binary_path=str(rocs_wrapper),
+            show_progress=show_progress,
+        )
+
+    raise ValueError(f"Unknown backend: {backend}. Expected: rdkit, cdpkit, openeye")
 
 
 def score_molecules(
-    scorer: RDKitROCSScorer,
+    scorer: Any,
     actives_smiles: List[str],
     decoys_smiles: List[str],
     ref_mols: List[Chem.Mol],
@@ -170,8 +232,11 @@ def score_molecules(
         if mol is not None
     ]
 
-    actives_scores = scorer.getScores(actives_mols).flatten()
-    decoys_scores = scorer.getScores(decoys_mols).flatten()
+    combined_mols = actives_mols + decoys_mols
+    combined_scores = scorer.getScores(combined_mols)
+    actives_count = len(actives_mols)
+    actives_scores = combined_scores[:actives_count].flatten()
+    decoys_scores = combined_scores[actives_count:].flatten()
     ref_scores = scorer.getScores(ref_mols).flatten()
 
     return {
@@ -695,6 +760,7 @@ def run_threshold_analysis(
     references_sdf: Optional[str] = None,
     current_threshold: Optional[float] = None,
     output_dir: str = 'threshold_analysis_results',
+    backend: str = "rdkit",
     max_conformers: Optional[int] = None,
     max_isomers: Optional[int] = None,
     max_heavy_atoms: Optional[int] = None,
@@ -748,18 +814,37 @@ def run_threshold_analysis(
     if num_threads is None:
         num_threads = 1 if n_jobs == 1 else 0
 
+    t0 = time.perf_counter()
     actives_smiles, decoys_smiles, ref_mols, ref_smiles = load_datasets(
         actives_csv, decoys_csv, references_sdf
     )
+    if verbose:
+        print(
+            f"Loaded actives={len(actives_smiles)} decoys={len(decoys_smiles)} "
+            f"refs={len(ref_mols)} in {time.perf_counter() - t0:.1f}s"
+        )
 
+    t0 = time.perf_counter()
     scorer = initialize_scorer(
-        references_sdf, max_conformers, max_isomers,
-        max_heavy_atoms, max_rotatable_bonds, num_threads, n_jobs
+        references_sdf,
+        backend=backend,
+        max_conformers=max_conformers,
+        max_isomers=max_isomers,
+        max_heavy_atoms=max_heavy_atoms,
+        max_rotatable_bonds=max_rotatable_bonds,
+        num_threads=num_threads,
+        n_jobs=n_jobs,
+        show_progress=verbose,
     )
+    if verbose:
+        print(f"Initialized scorer (backend={backend}) in {time.perf_counter() - t0:.1f}s")
 
+    t0 = time.perf_counter()
     score_data = score_molecules(
         scorer, actives_smiles, decoys_smiles, ref_mols
     )
+    if verbose:
+        print(f"Scored molecules in {time.perf_counter() - t0:.1f}s")
 
     roc_data = perform_roc_analysis(
         score_data['actives_scores'], score_data['decoys_scores']

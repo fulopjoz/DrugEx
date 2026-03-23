@@ -150,6 +150,15 @@ The threshold analysis script (`threshold_analysis.py`) uses ROC methodology:
 
 Edit `ROCS_THRESHOLD` in `config.py` based on analysis results.
 
+### Threshold Sweep (Multiple Backends/Queries)
+
+To rerun threshold determination for multiple query files and ROCS backends
+(RDKit/CDPKit/OpenEye) and save a compact summary table + overlap plots:
+
+```bash
+python threshold_sweep.py
+```
+
 ## Configuration
 
 Key parameters in `config.py`:
