@@ -26,7 +26,7 @@ mkdir -p "${SCRATCHDIR}/profiles"
 cleanup() {
     if [ -d "${SCRATCHDIR}/profiles" ]; then
         mkdir -p "${FINAL_PROFILES}"
-        cp "${SCRATCHDIR}/profiles/"*_interactions.json "${FINAL_PROFILES}/" 2>/dev/null \
+        rsync -a --include='*_interactions.json' --exclude='*' "${SCRATCHDIR}/profiles/" "${FINAL_PROFILES}/" \
             || echo "WARNING: profile copy failed! Files at $(hostname):${SCRATCHDIR}/profiles"
     fi
     rm -rf "${SCRATCHDIR}"

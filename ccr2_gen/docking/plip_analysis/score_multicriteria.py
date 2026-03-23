@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
@@ -49,6 +50,10 @@ from rdkit import Chem, DataStructs
 from rdkit.Chem import AllChem
 from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.ML.Cluster import Butina
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from run_plip import IFP_MAX
 
 
 # ── Composite weights (literature-informed) ─────────────────────────────
@@ -58,20 +63,25 @@ W_LE = 0.20     # Ligand efficiency (penalizes molecular bloat)
 W_SA = 0.15     # Synthetic accessibility (ease of synthesis)
 W_ROCS = 0.10   # Shape similarity to known CCR2 ligands
 
-IFP_MAX = 19.0  # Maximum tiered IFP score
 
-
-def normalize_column(series: pd.Series, higher_is_better: bool = True) -> pd.Series:
-    """Min-max normalize to [0, 1]. Handles NaN by filling with 0."""
-    vals = series.copy()
-    vmin, vmax = vals.min(), vals.max()
+def normalize_column(
+    series: pd.Series,
+    higher_is_better: bool = True,
+    missing_value: float = 0.5,
+) -> pd.Series:
+    """Min-max normalize to [0, 1] with neutral imputation for missing values."""
+    vals = pd.to_numeric(series.copy(), errors="coerce")
+    valid = vals.dropna()
+    if valid.empty:
+        return pd.Series(missing_value, index=series.index, dtype=float)
+    vmin, vmax = valid.min(), valid.max()
     if vmin == vmax:
-        return pd.Series(0.5, index=series.index)
+        return pd.Series(0.5, index=series.index, dtype=float)
     if higher_is_better:
         normed = (vals - vmin) / (vmax - vmin)
     else:
         normed = (vmax - vals) / (vmax - vmin)
-    return normed.fillna(0.0)
+    return normed.fillna(missing_value)
 
 
 def compute_ligand_efficiency(dock_score: pd.Series, n_heavy: pd.Series) -> pd.Series:
@@ -156,8 +166,8 @@ def score_track(track_df: pd.DataFrame, lib_df: pd.DataFrame,
     df["LE_norm"] = normalize_column(df["LE"], higher_is_better=True)
     # SA: lower = easier to synthesize → higher_is_better=False
     df["SA_norm"] = normalize_column(df["SA"], higher_is_better=False)
-    df["ROCS_norm"] = normalize_column(df.get("rocs_best", pd.Series(dtype=float)),
-                                        higher_is_better=True)
+    rocs_series = df["rocs_best"] if "rocs_best" in df.columns else pd.Series(np.nan, index=df.index)
+    df["ROCS_norm"] = normalize_column(rocs_series, higher_is_better=True)
 
     # Multi-criteria composite
     df["composite_v2"] = (

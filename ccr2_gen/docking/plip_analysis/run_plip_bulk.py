@@ -50,7 +50,7 @@ def main():
         raise RuntimeError(f"Failed to load receptor: {args.receptor_pdb}")
 
     # Read poses from SDF
-    suppl = Chem.SDMolSupplier(str(args.poses_sdf), removeHs=True)
+    suppl = Chem.SDMolSupplier(str(args.poses_sdf), removeHs=False)
     n_ok = 0
     n_fail = 0
 
@@ -63,6 +63,7 @@ def main():
             mol_id = mol.GetProp("_Name") if mol.HasProp("_Name") else f"mol_{n_ok + n_fail}"
             dock_id = mol.GetProp("dock_id") if mol.HasProp("dock_id") else mol_id
 
+            tmp_path = None
             try:
                 # Combine protein + ligand in memory
                 complex_mol = Chem.CombineMols(protein, mol)
@@ -97,7 +98,8 @@ def main():
                     print(f"  {dock_id}: FAILED - {e}")
                 # Clean up temp on error too
                 try:
-                    tmp_path.unlink(missing_ok=True)
+                    if tmp_path is not None:
+                        tmp_path.unlink(missing_ok=True)
                 except Exception:
                     pass
 

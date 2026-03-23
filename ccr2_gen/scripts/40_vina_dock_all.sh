@@ -34,7 +34,7 @@ SCRATCHDIR="/scratch/$USER/${PBS_JOBID}"
 mkdir -p "${SCRATCHDIR}"
 cleanup() {
     if [ -d "${SCRATCHDIR}/out" ]; then
-        CIDX=$(printf "%04d" ${PBS_ARRAY_INDEX})
+        CIDX=$(printf "%03d" ${PBS_ARRAY_INDEX})
         mkdir -p "${FINAL_OUT}/chunk_${CIDX}"
         cp -r "${SCRATCHDIR}/out/"* "${FINAL_OUT}/chunk_${CIDX}/" \
             || echo "WARNING: copy failed! Files at $(hostname):${SCRATCHDIR}/out"
@@ -52,7 +52,7 @@ set -eu
 cd "${DRUGEX_DIR}"
 export PYTHONPATH="${DRUGEX_DIR}:${PYTHONPATH:-}"
 
-CIDX=$(printf "%04d" ${PBS_ARRAY_INDEX})
+CIDX=$(printf "%03d" ${PBS_ARRAY_INDEX})
 CHUNK_FILE="${CHUNK_DIR}/chunk_${CIDX}.tsv"
 
 if [ ! -f "${CHUNK_FILE}" ]; then

@@ -136,10 +136,14 @@ def score_track(
         for c in scored:
             c["dock_norm"] = round((worst - c["dock_score"]) / rng, 4)
             c["composite"] = round(0.5 * c["ifp_norm"] + 0.5 * c["dock_norm"], 4)
+        for c in candidates:
+            if c["dock_score"] is None:
+                c["dock_norm"] = 0.0
+                c["composite"] = round(0.5 * c["ifp_norm"], 4)
     else:
         for c in candidates:
-            c["dock_norm"] = 0
-            c["composite"] = c["ifp_norm"] * 0.5
+            c["dock_norm"] = 0.0
+            c["composite"] = round(c["ifp_norm"] * 0.5, 4)
 
     candidates.sort(key=lambda c: c.get("composite", 0), reverse=True)
     for i, c in enumerate(candidates):
