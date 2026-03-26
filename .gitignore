@@ -23,7 +23,18 @@
 tmp*
 
 ### CCR2 Project (entire directory — 117GB experiment output)
-/ccr2_gen/
+# NOTE: ccr2_gen/ is ignored EXCEPT for specific tracked subdirectories.
+# Git requires un-ignoring each ancestor directory individually.
+/ccr2_gen/*
+!/ccr2_gen/schrodtainer/
+!/ccr2_gen/scripts/
+/ccr2_gen/schrodtainer/*
+!/ccr2_gen/schrodtainer/images/
+/ccr2_gen/schrodtainer/images/*
+!/ccr2_gen/schrodtainer/images/glide/
+/ccr2_gen/schrodtainer/images/glide/*
+!/ccr2_gen/schrodtainer/images/glide/src/
+!/ccr2_gen/schrodtainer/images/glide/GLIDE_DEBUG_REPORT.md
 /pbs_logs_archive/
 
 ### Downloaded Data
