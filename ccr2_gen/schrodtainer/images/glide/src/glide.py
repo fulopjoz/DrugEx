@@ -116,6 +116,7 @@ NUM_STEREOISOMERS   32""")
          "-NJOBS", "1",
          "-JOBNAME", "ligprep_job",
          "-HOST", "localhost",
+         "-WAIT",
          "-omae", out_mae],
         check=True,
         cwd=work_dir,
@@ -125,13 +126,12 @@ NUM_STEREOISOMERS   32""")
     if not os.path.exists(out_mae):
         # Search for any .mae file LigPrep produced
         import glob
-        candidates = glob.glob(os.path.join(work_dir, "*.mae"))
+        candidates = glob.glob(os.path.join(work_dir, "*.mae*"))
         candidates = [c for c in candidates if os.path.getsize(c) > 0]
         if candidates:
             out_mae = candidates[0]
             print(f"  LigPrep output found at: {os.path.basename(out_mae)}")
         else:
-            # List directory for diagnostics
             contents = os.listdir(work_dir)
             raise FileNotFoundError(
                 f"LigPrep produced no .mae output. "
