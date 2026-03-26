@@ -24,8 +24,15 @@ mkdir -p "$SCRATCHDIR"
 cp images/glide/src/glide.py "$SCRATCHDIR/glide.py"
 cp images/glide/src/run_glide.py "$SCRATCHDIR/run_glide.py"
 
-# Apptainer image — same location as qsub_chunk_WT.sh
-APPTAINER_IMAGE_PATH=$(pwd)/images/glide.sif
+# Apptainer image — try data/images (production) then images/ (dev)
+if [[ -f "$(pwd)/data/images/glide/glide.sif" ]]; then
+    APPTAINER_IMAGE_PATH=$(pwd)/data/images/glide/glide.sif
+elif [[ -f "$(pwd)/images/glide.sif" ]]; then
+    APPTAINER_IMAGE_PATH=$(pwd)/images/glide.sif
+else
+    echo "ERROR: glide.sif not found in data/images/glide/ or images/" >&2
+    exit 1
+fi
 
 # Test grid bundled with schrodtainer
 GLIDE_GRID_FILE=$(pwd)/images/glide/src/test_grid.zip
