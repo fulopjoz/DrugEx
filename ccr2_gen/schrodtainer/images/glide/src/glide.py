@@ -104,7 +104,6 @@ def ligprep(mgz_path: str) -> str:
 MAX_ATOMS   500
 FORCE_FIELD   16
 EPIK   yes
-EPIKX   yes
 EPIK_METAL_BINDING   no
 INCLUDE_ORIGINAL_STATE   no
 DETERMINE_CHIRALITIES   no
