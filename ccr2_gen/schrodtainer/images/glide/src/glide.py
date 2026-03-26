@@ -90,9 +90,9 @@ def ligprep(mgz_path: str) -> str:
     """Run LigPrep on the given MAE file.
 
     Args:
-        mgz_path (str): The path to the MAE file.
+        mgz_path (str): Path to the input MAE file.
     Returns:
-        str: The path to the prepared ligand MAE file.
+        str: Path to the prepared ligand MAE file.
     """
     work_dir = tempfile.mkdtemp(prefix="ligprep_")
     mgz_path = os.path.abspath(mgz_path)
@@ -120,8 +120,23 @@ NUM_STEREOISOMERS   32""")
         check=True,
         cwd=work_dir,
     )
+
+    # LigPrep may write to -omae path or to {JOBNAME}-out.mae
     if not os.path.exists(out_mae):
-        raise FileNotFoundError(f"LigPrep output not found: {out_mae}")
+        # Search for any .mae file LigPrep produced
+        import glob
+        candidates = glob.glob(os.path.join(work_dir, "*.mae"))
+        candidates = [c for c in candidates if os.path.getsize(c) > 0]
+        if candidates:
+            out_mae = candidates[0]
+            print(f"  LigPrep output found at: {os.path.basename(out_mae)}")
+        else:
+            # List directory for diagnostics
+            contents = os.listdir(work_dir)
+            raise FileNotFoundError(
+                f"LigPrep produced no .mae output. "
+                f"Work dir contents: {contents}"
+            )
     return out_mae
 
 def unzip_and_list(zip_path: Union[str, Path], extract_to: Optional[Union[str, Path]] = None) -> list[str]:
