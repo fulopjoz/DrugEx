@@ -28,6 +28,12 @@ MAX_OPTIMIZATION_ITERATIONS = 20
 OPTIMIZATION_STOP_GRADIENT = 1.0
 
 _DEFAULT_CDPKIT_GROUP_NAME = "_default_group"
+_VALID_OPTIMIZATION_MODES = frozenset({"shape", "combo", "color"})
+_MODE_TO_SCORE_NAME = {
+    "shape": "ShapeTanimoto",
+    "combo": "TanimotoCombo",
+    "color": "ColorTanimoto",
+}
 
 
 @dataclass
@@ -47,6 +53,7 @@ class CDPKitWorkerContext:
     reference_shapes: List
     group_to_indices: List[List[int]]
     conf_file: str
+    optimization_mode: Optional[str] = None
 
 
 class CDPKitScoringWorker:
@@ -114,7 +121,9 @@ class CDPKitScoringWorker:
                 if not name or not name.startswith(target_prefix):
                     continue
                 # Generate shapes for all conformers of this record and evaluate best
-                query_shapes = _generate_shape_helper(m)
+                query_shapes = _generate_shape_helper(
+                    m, include_color=ctx.optimization_mode != "shape"
+                )
                 if not query_shapes:
                     continue
                 for group_idx, ref_indices in enumerate(ctx.group_to_indices):
@@ -122,7 +131,11 @@ class CDPKitScoringWorker:
                     for ref_idx in ref_indices:
                         ref_shape = ctx.reference_shapes[ref_idx]
                         for query_shape in query_shapes:
-                            score = _align_and_score_helper(query_shape, ref_shape)
+                            score = _align_and_score_helper(
+                                query_shape,
+                                ref_shape,
+                                ctx.optimization_mode,
+                            )
                             if score > best:
                                 best = score
                     group_scores[group_idx] = best
@@ -132,7 +145,7 @@ class CDPKitScoringWorker:
         return mol_id, group_scores
 
 
-def _generate_shape_helper(cdpkit_mol):
+def _generate_shape_helper(cdpkit_mol, include_color: bool = True):
     """Generate Gaussian shape(s) for a molecule.
 
     Returns a list of shapes to ensure all conformers are considered.
@@ -141,7 +154,7 @@ def _generate_shape_helper(cdpkit_mol):
     try:
         CDPLPharm.prepareForPharmacophoreGeneration(cdpkit_mol)
         shape_gen = CDPLShape.GaussianShapeGenerator()
-        shape_gen.generatePharmacophoreShape(True)
+        shape_gen.generatePharmacophoreShape(include_color)
         # Enable multi-conformer mode so every available conformer contributes a shape
         shape_gen.multiConformerMode(True)
         shape_set = shape_gen.generate(cdpkit_mol)
@@ -152,11 +165,24 @@ def _generate_shape_helper(cdpkit_mol):
         return []
 
 
-def _align_and_score_helper(query_shape, ref_shape):
-    """Align two shapes and return the best TanimotoCombo score."""
+def _align_and_score_helper(
+    query_shape,
+    ref_shape,
+    optimization_mode: Optional[str] = None,
+):
+    """Align shapes and return the requested similarity component.
+
+    CDPKit exposes no color-overlap gradient. Explicit color mode therefore
+    adds color-centred starting poses and selects the best color score; it is
+    an approximation rather than gradient-based color optimization.
+    """
     try:
+        effective_mode = optimization_mode or "combo"
         aligner = CDPLShape.GaussianShapeAlignment()
         start_generator = CDPLShape.PrincipalAxesAlignmentStartGenerator()
+        if effective_mode == "color":
+            start_generator.genColorCenterStarts(True)
+            start_generator.genForAlignedShapeCenters(True)
         aligner.setStartGenerator(start_generator)
         aligner.setMaxNumOptimizationIterations(MAX_OPTIMIZATION_ITERATIONS)
         aligner.setOptimizationStopGradient(OPTIMIZATION_STOP_GRADIENT)
@@ -166,7 +192,12 @@ def _align_and_score_helper(query_shape, ref_shape):
         best_score = 0.0
         for i in range(aligner.getNumResults()):
             alignment_result = aligner.getResult(i)
-            score = CDPLShape.calcTanimotoComboScore(alignment_result)
+            if effective_mode == "shape":
+                score = CDPLShape.calcShapeTanimotoScore(alignment_result)
+            elif effective_mode == "color":
+                score = CDPLShape.calcColorTanimotoScore(alignment_result)
+            else:
+                score = CDPLShape.calcTanimotoComboScore(alignment_result)
             best_score = max(best_score, score)
         return best_score
     except (RuntimeError, ValueError):
@@ -189,7 +220,6 @@ class CDPKitROCSScorer(Scorer):
         group_definitions: List of (name, paths) tuples defining reference groups.
         group_names: List of reference group names.
         shape_generator: CDPKit GaussianShapeGenerator instance.
-        start_generator: CDPKit PrincipalAxesAlignmentStartGenerator instance.
         reference_mols: Loaded CDPKit molecules containing reference conformers.
         reference_shapes: Pre-computed Gaussian shapes for all references.
         group_to_indices: List mapping group indices to reference indices.
@@ -204,6 +234,7 @@ class CDPKitROCSScorer(Scorer):
         references: Union[str, List[str], Dict[str, List[str]]],
         show_progress: bool = True,
         n_jobs: int = -1,
+        optimization_mode: Optional[str] = None,
     ):
         """Build a CDPKit ROCS scorer.
 
@@ -213,6 +244,9 @@ class CDPKitROCSScorer(Scorer):
                 to lists of reference paths.
             show_progress: Enables stdout progress indicators when True.
             n_jobs: Number of worker processes (-1 uses all available CPUs).
+            optimization_mode: Explicit alignment and returned-score objective.
+                Accepted values are ``shape``, ``combo``, and ``color``.
+                ``None`` preserves legacy combo behavior and result keys.
 
         Raises:
             ImportError: If CDPKit bindings are not available.
@@ -224,8 +258,17 @@ class CDPKitROCSScorer(Scorer):
 
         if not CDPL_AVAILABLE:
             raise ImportError("CDPKit is required. Install with `pip install cdpkit`.")
+        if (
+            optimization_mode is not None
+            and optimization_mode not in _VALID_OPTIMIZATION_MODES
+        ):
+            raise ValueError(
+                "optimization_mode must be 'shape', 'combo', or 'color', "
+                f"got {optimization_mode!r}"
+            )
 
         self.conformer_generator = conformer_generator
+        self.optimization_mode = optimization_mode
         self.show_progress = show_progress
         self.n_jobs = n_jobs if n_jobs != -1 else cpu_count()
 
@@ -233,9 +276,10 @@ class CDPKitROCSScorer(Scorer):
         self.group_names = [name for name, _ in self.group_definitions]
 
         self.shape_generator = CDPLShape.GaussianShapeGenerator()
-        self.shape_generator.generatePharmacophoreShape(True)
+        self.shape_generator.generatePharmacophoreShape(
+            optimization_mode != "shape"
+        )
         self.shape_generator.multiConformerMode(False)
-        self.start_generator = CDPLShape.PrincipalAxesAlignmentStartGenerator()
 
         self.reference_mols: List = []
         self.reference_shapes: List = []
@@ -329,36 +373,26 @@ class CDPKitROCSScorer(Scorer):
                 print(f"Warning: shape generation failed: {exc}")
             return None
 
-    def _align_and_score(self, query_shape, ref_shape) -> float:
-        try:
-            aligner = CDPLShape.GaussianShapeAlignment()
-            aligner.setStartGenerator(self.start_generator)
-            aligner.setMaxNumOptimizationIterations(MAX_OPTIMIZATION_ITERATIONS)
-            aligner.setOptimizationStopGradient(OPTIMIZATION_STOP_GRADIENT)
-            aligner.addReferenceShape(ref_shape)
-            if not aligner.align(query_shape) or aligner.getNumResults() == 0:
-                return 0.0
-            best_score = 0.0
-            for i in range(aligner.getNumResults()):
-                result = aligner.getResult(i)
-                score = CDPLShape.calcTanimotoComboScore(result)
-                best_score = max(best_score, score)
-            return best_score
-        except (RuntimeError, ValueError) as exc:
-            if self.show_progress:
-                print(f"Warning: alignment failed: {exc}")
-            return 0.0
-
     def getKey(self) -> List[str]:
+        suffix = (
+            ""
+            if self.optimization_mode is None
+            else f"_mode_{self.optimization_mode}"
+        )
+        score_name = (
+            "TanimotoCombo"
+            if self.optimization_mode is None
+            else _MODE_TO_SCORE_NAME[self.optimization_mode]
+        )
         if (
             len(self.group_names) == 1
             and self.group_names[0] == _DEFAULT_CDPKIT_GROUP_NAME
         ):
             if self._is_supermol:
-                return ["CDPKit_ROCS_Supermol_TanimotoCombo"]
+                return [f"CDPKit_ROCS_Supermol_{score_name}{suffix}"]
             refs = len(self.reference_shapes)
-            return [f"CDPKit_ROCS_Aggregate_{refs}refs_TanimotoCombo"]
-        return [f"CDPKit_{name}" for name in self.group_names]
+            return [f"CDPKit_ROCS_Aggregate_{refs}refs_{score_name}{suffix}"]
+        return [f"CDPKit_{name}{suffix}" for name in self.group_names]
 
     def create_progress_bar(self, total, desc):
         if not self.show_progress:
@@ -378,7 +412,8 @@ class CDPKitROCSScorer(Scorer):
             frags: Unused, kept for interface compatibility.
 
         Returns:
-            Array of shape (len(mols), num_groups) with TanimotoCombo scores.
+            Array of shape ``(len(mols), num_groups)`` with the configured
+            similarity component.
         """
         num_groups = len(self.group_to_indices)
         if num_groups == 0:
@@ -433,6 +468,7 @@ class CDPKitROCSScorer(Scorer):
                 reference_shapes=self.reference_shapes,
                 group_to_indices=self.group_to_indices,
                 conf_file=conf_file,
+                optimization_mode=self.optimization_mode,
             )
             worker = CDPKitScoringWorker()
 
