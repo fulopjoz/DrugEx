@@ -91,6 +91,11 @@ CDPKit does not expose a color-overlap gradient. Its explicit color mode adds co
 starting poses and selects the best color score; this is an approximation and is not expected to
 equal OpenEye or RDKit numerically.
 
+RDKit alignment starts are canonicalized to principal axes and evaluated under the four
+chirality-preserving axis-sign rotations. This prevents scores from depending on the input
+coordinate frame or atom order. Results produced before this correction can shift numerically;
+regenerate reference outputs and recalibrate thresholds when upgrading an existing workflow.
+
 ## Quick Start
 
 ### 1. Fine-Tune Model

@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from rdkit import Chem
-from rdkit.Chem import rdShapeAlign, AllChem
+from rdkit.Chem import rdShapeAlign, AllChem, rdMolTransforms
 
 from drugex.training.scorers.interfaces import ConformerGenerator, Scorer
 
@@ -21,6 +21,40 @@ _MODE_TO_SCORE_TYPE = {
     "color": "color",
 }
 _MODE_TO_OPT_PARAM = {"shape": 1.0, "combo": 0.5, "color": 0.0}
+_AXIS_SIGN_FLIPS: Tuple[Tuple[int, int, int], ...] = (
+    (1, 1, 1),
+    (1, -1, -1),
+    (-1, 1, -1),
+    (-1, -1, 1),
+)
+
+
+def _canonicalize_conformer_inplace(mol: Chem.Mol, conf_id: int) -> None:
+    """Place one conformer in its principal-axis frame.
+
+    Degenerate geometries can have a singular inertia tensor. Leaving those
+    geometries unchanged is preferable to discarding the molecule.
+    """
+    try:
+        rdMolTransforms.CanonicalizeConformer(mol.GetConformer(conf_id))
+    except (RuntimeError, ValueError):
+        pass
+
+
+def _flip_conformer(
+    mol: Chem.Mol,
+    conf_id: int,
+    signs: Tuple[int, int, int],
+) -> Chem.Mol:
+    """Return a copy after a proper principal-axis sign rotation."""
+    output = Chem.Mol(mol)
+    transform = np.eye(4)
+    transform[0, 0], transform[1, 1], transform[2, 2] = signs
+    rdMolTransforms.TransformConformer(
+        output.GetConformer(conf_id),
+        transform,
+    )
+    return output
 
 
 def _score_single_reference(
@@ -44,36 +78,54 @@ def _score_single_reference(
     if query_mol.GetNumConformers() == 0 or ref_mol.GetNumConformers() == 0:
         return 0.0
 
+    reference = Chem.Mol(ref_mol)
+    for ref_conf in reference.GetConformers():
+        _canonicalize_conformer_inplace(reference, ref_conf.GetId())
+
     best_score = 0.0
     for query_conf in query_mol.GetConformers():
-        for ref_conf in ref_mol.GetConformers():
-            try:
-                probe_copy = Chem.Mol(query_mol)
-                align_kwargs = {
-                    "refConfId": ref_conf.GetId(),
-                    "probeConfId": query_conf.GetId(),
-                    "useColors": use_colors,
-                }
-                if optimization_mode is not None:
-                    align_kwargs["opt_param"] = _MODE_TO_OPT_PARAM[
-                        optimization_mode
-                    ]
-                result = rdShapeAlign.AlignMol(ref_mol, probe_copy, **align_kwargs)
-            except (RuntimeError, ValueError):
-                continue
+        canonical_probe = Chem.Mol(query_mol)
+        _canonicalize_conformer_inplace(
+            canonical_probe,
+            query_conf.GetId(),
+        )
+        for ref_conf in reference.GetConformers():
+            for signs in _AXIS_SIGN_FLIPS:
+                probe_copy = _flip_conformer(
+                    canonical_probe,
+                    query_conf.GetId(),
+                    signs,
+                )
+                try:
+                    align_kwargs = {
+                        "refConfId": ref_conf.GetId(),
+                        "probeConfId": query_conf.GetId(),
+                        "useColors": use_colors,
+                    }
+                    if optimization_mode is not None:
+                        align_kwargs["opt_param"] = _MODE_TO_OPT_PARAM[
+                            optimization_mode
+                        ]
+                    result = rdShapeAlign.AlignMol(
+                        reference,
+                        probe_copy,
+                        **align_kwargs,
+                    )
+                except (RuntimeError, ValueError):
+                    continue
 
-            if not isinstance(result, (list, tuple)) or len(result) < 2:
-                continue
+                if not isinstance(result, (list, tuple)) or len(result) < 2:
+                    continue
 
-            shape_score, color_score = result[0], result[1]
-            if score_type == "shape":
-                score = shape_score
-            elif score_type == "color":
-                score = color_score
-            else:
-                score = shape_score + color_score
-            if score > best_score:
-                best_score = score
+                shape_score, color_score = result[0], result[1]
+                if score_type == "shape":
+                    score = shape_score
+                elif score_type == "color":
+                    score = color_score
+                else:
+                    score = shape_score + color_score
+                if score > best_score:
+                    best_score = score
     return best_score
 
 
