@@ -5,12 +5,11 @@ import numpy as np
 from scipy.stats import gmean
 
 import torch
-from torch import nn
 from tqdm import tqdm
 
 from drugex import DEFAULT_GPUS, DEFAULT_DEVICE
 from drugex.logs import logger
-from drugex.training.interfaces import Model
+from drugex.training.interfaces import Model, _maybe_data_parallel
 from drugex.training.monitors import NullMonitor
 
 class Explorer(Model, ABC):
@@ -241,7 +240,7 @@ class FragExplorer(Explorer):
             The average loss of the agent
         """
 
-        net = nn.DataParallel(self.agent, device_ids=self.gpus)
+        net = _maybe_data_parallel(self.agent, self.device, self.gpus)
         total_steps = len(loader)
         
         for step_idx, src in enumerate(tqdm(loader, desc='Calculating policy gradient...', leave=False)):
@@ -310,7 +309,7 @@ class FragExplorer(Explorer):
         self.bestState = self.getModel()
 
         n_iters = 1 if self.crover is None else 10
-        net = nn.DataParallel(self, device_ids=self.gpus)
+        net = _maybe_data_parallel(self, self.device, self.gpus)
         logger.info(' ')
         
         for it in range(n_iters):

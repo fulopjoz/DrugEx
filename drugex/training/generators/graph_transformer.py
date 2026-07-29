@@ -9,6 +9,7 @@ from drugex.data.datasets import GraphFragDataSet
 from drugex.molecules.converters.dummy_molecules import dummyMolsFromFragments
 from drugex.training.generators.utils import PositionwiseFeedForward, SublayerConnection, PositionalEncoding, tri_mask
 from drugex.training.generators.interfaces import FragGenerator
+from drugex.training.interfaces import _maybe_data_parallel
 from drugex.utils import ScheduledOptim
 from torch import optim
 
@@ -314,7 +315,7 @@ class GraphTransformer(FragGenerator):
             The training loss of the epoch
         """
 
-        net = nn.DataParallel(self, device_ids=self.gpus)
+        net = _maybe_data_parallel(self, self.device, self.gpus)
         total_steps = len(loader)
         current_step = 0
         for src in tqdm(loader, desc='Iterating over training batches', leave=False):
@@ -360,7 +361,7 @@ class GraphTransformer(FragGenerator):
 
         valid_metrics = {}
         
-        net = nn.DataParallel(self, device_ids=self.gpus)
+        net = _maybe_data_parallel(self, self.device, self.gpus)
         pbar = tqdm(loader, desc='Iterating over validation batches', leave=False)
         smiles, frags = self.sample(pbar)
         scores = self.evaluate(smiles, frags, evaluator=evaluator, no_multifrag_smiles=no_multifrag_smiles)
@@ -390,7 +391,7 @@ class GraphTransformer(FragGenerator):
         frags : list
             List of fragments
         """
-        net = nn.DataParallel(self, device_ids=self.gpus)
+        net = _maybe_data_parallel(self, self.device, self.gpus)
         frags, smiles = [], []
         with torch.no_grad():              
             for src in loader:
