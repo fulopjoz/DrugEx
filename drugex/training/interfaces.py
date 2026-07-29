@@ -8,6 +8,18 @@ from drugex.logs import logger
 from torch import nn
 
 
+def _maybe_data_parallel(
+    module: nn.Module,
+    device: torch.device | str,
+    device_ids: tuple[int, ...],
+) -> nn.Module:
+    """Wrap a module for multi-GPU execution when its device is CUDA."""
+    normalized_device = torch.device(device)
+    if normalized_device.type == "cpu":
+        return module
+    return nn.DataParallel(module, device_ids=device_ids)
+
+
 class ModelEvaluator(ABC):
     """
     A simple function to score a model based on the generated molecules and input fragments if applicable.
@@ -265,6 +277,7 @@ class Model(nn.Module, ModelProvider, ABC):
             List of GPUs to use for the model.
         """
 
+        device = torch.device(device)
         if device.type == 'cpu':
             self.device = torch.device('cpu')
             self.gpus = (-1,)
