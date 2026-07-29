@@ -6,6 +6,7 @@ From v3.4.8 to v3.4.9
 - Fix broken link to quick start tutorial in README
 - Add explicit shape, combo, and color optimization modes to ROCS scorers while preserving
   omitted-mode behavior.
+- Make RDKit ROCS scores invariant to rigid input pose and atom ordering.
 
 ## Changes
 
