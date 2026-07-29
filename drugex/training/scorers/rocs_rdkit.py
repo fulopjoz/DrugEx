@@ -13,6 +13,14 @@ from drugex.training.scorers.interfaces import ConformerGenerator, Scorer
 
 _RDKIT_WORKER_SETTINGS: Dict[str, object] = {}
 _DEFAULT_RDKIT_GROUP_NAME = "_default_group"
+_VALID_OPTIMIZATION_MODES = frozenset({"shape", "combo", "color"})
+_VALID_SCORE_TYPES = frozenset({"shape", "color", "TanimotoCombo"})
+_MODE_TO_SCORE_TYPE = {
+    "shape": "shape",
+    "combo": "TanimotoCombo",
+    "color": "color",
+}
+_MODE_TO_OPT_PARAM = {"shape": 1.0, "combo": 0.5, "color": 0.0}
 
 
 def _score_single_reference(
@@ -20,16 +28,16 @@ def _score_single_reference(
     ref_mol: Chem.Mol,
     score_type: str,
     use_colors: bool,
+    optimization_mode: Optional[str] = None,
 ) -> float:
     """Compute best alignment score between a query molecule and one reference.
 
     Uses rdShapeAlign.AlignMol which performs Gaussian shape overlay (same
     algorithm family as OpenEye ROCS and CDPKit GaussianShapeAlignment).
 
-    ``AlignMol`` currently uses its default ``opt_param=1.0`` and therefore
-    optimizes the overlay for shape. Color and combo values are evaluated at
-    that shape-optimized pose. A caller must not interpret the legacy color
-    or combo result as proof that the pose was optimized for that objective.
+    When ``optimization_mode`` is omitted, ``AlignMol`` retains its legacy
+    default ``opt_param=1.0``. Explicit modes use 1.0 for shape, 0.5 for
+    combo, and 0.0 for color.
     """
     if query_mol is None or ref_mol is None:
         return 0.0
@@ -41,13 +49,16 @@ def _score_single_reference(
         for ref_conf in ref_mol.GetConformers():
             try:
                 probe_copy = Chem.Mol(query_mol)
-                result = rdShapeAlign.AlignMol(
-                    ref_mol,
-                    probe_copy,
-                    refConfId=ref_conf.GetId(),
-                    probeConfId=query_conf.GetId(),
-                    useColors=use_colors,
-                )
+                align_kwargs = {
+                    "refConfId": ref_conf.GetId(),
+                    "probeConfId": query_conf.GetId(),
+                    "useColors": use_colors,
+                }
+                if optimization_mode is not None:
+                    align_kwargs["opt_param"] = _MODE_TO_OPT_PARAM[
+                        optimization_mode
+                    ]
+                result = rdShapeAlign.AlignMol(ref_mol, probe_copy, **align_kwargs)
             except (RuntimeError, ValueError):
                 continue
 
@@ -71,6 +82,7 @@ def _rdkit_worker_init(
     group_to_indices: List[List[int]],
     score_type: str,
     use_colors: bool,
+    optimization_mode: Optional[str],
 ) -> None:
     """Initializer to share immutable worker state."""
     global _RDKIT_WORKER_SETTINGS
@@ -79,6 +91,7 @@ def _rdkit_worker_init(
         "group_to_indices": group_to_indices,
         "score_type": score_type,
         "use_colors": use_colors,
+        "optimization_mode": optimization_mode,
     }
 
 
@@ -90,6 +103,7 @@ def _score_molecule_rdkit_worker(args: Tuple[int, List[Chem.Mol]]) -> Tuple[int,
     group_to_indices: List[List[int]] = settings.get("group_to_indices", [])
     score_type: str = settings.get("score_type", "TanimotoCombo")
     use_colors: bool = settings.get("use_colors", True)
+    optimization_mode: Optional[str] = settings.get("optimization_mode")
     num_groups = len(group_to_indices) if group_to_indices else (1 if reference_mols else 0)
     if not mol_conformers or num_groups == 0:
         return mol_id, [0.0] * num_groups
@@ -102,7 +116,13 @@ def _score_molecule_rdkit_worker(args: Tuple[int, List[Chem.Mol]]) -> Tuple[int,
             for group_idx, ref_indices in enumerate(group_to_indices):
                 for ref_idx in ref_indices:
                     ref_mol = reference_mols[ref_idx]
-                    score = _score_single_reference(conf_mol, ref_mol, score_type, use_colors)
+                    score = _score_single_reference(
+                        conf_mol,
+                        ref_mol,
+                        score_type,
+                        use_colors,
+                        optimization_mode,
+                    )
                     if score > group_scores[group_idx]:
                         group_scores[group_idx] = score
     except (RuntimeError, ValueError, AttributeError, TypeError) as exc:
@@ -151,6 +171,7 @@ class RDKitROCSScorer(Scorer):
         use_colors: bool = True,
         show_progress: bool = True,
         n_jobs: int = -1,
+        optimization_mode: Optional[str] = None,
     ):
         """Initialize the RDKit ROCS scorer.
 
@@ -162,6 +183,9 @@ class RDKitROCSScorer(Scorer):
             use_colors: Whether to include pharmacophore colors in alignments.
             show_progress: Enables stdout progress updates when True.
             n_jobs: Number of worker processes (-1 uses all available CPUs).
+            optimization_mode: Explicit alignment and returned-score objective.
+                Accepted values are ``shape``, ``combo``, and ``color``.
+                ``None`` preserves legacy behavior.
 
         Raises:
             TypeError: If reference inputs use unsupported types.
@@ -170,9 +194,30 @@ class RDKitROCSScorer(Scorer):
         """
         super().__init__()
 
+        if score_type not in _VALID_SCORE_TYPES:
+            raise ValueError(
+                f"score_type must be one of {sorted(_VALID_SCORE_TYPES)}, "
+                f"got {score_type!r}"
+            )
+        if (
+            optimization_mode is not None
+            and optimization_mode not in _VALID_OPTIMIZATION_MODES
+        ):
+            raise ValueError(
+                "optimization_mode must be 'shape', 'combo', or 'color', "
+                f"got {optimization_mode!r}"
+            )
+
         self.conformer_generator = conformer_generator
-        self.score_type = score_type
-        self.use_colors = use_colors
+        self.optimization_mode = optimization_mode
+        self.score_type = (
+            score_type
+            if optimization_mode is None
+            else _MODE_TO_SCORE_TYPE[optimization_mode]
+        )
+        self.use_colors = (
+            use_colors if optimization_mode is None else optimization_mode != "shape"
+        )
         self.show_progress = show_progress
         self.n_jobs = n_jobs if n_jobs != -1 else cpu_count()
 
@@ -314,6 +359,11 @@ class RDKitROCSScorer(Scorer):
         self.group_to_indices = new_group_to_indices
 
     def getKey(self) -> List[str]:
+        suffix = (
+            ""
+            if self.optimization_mode is None
+            else f"_mode_{self.optimization_mode}"
+        )
         if (
             len(self.group_names) == 1
             and self.group_names[0] == _DEFAULT_RDKIT_GROUP_NAME
@@ -321,12 +371,18 @@ class RDKitROCSScorer(Scorer):
             prefix = "RDKit_Supermol" if self._single_reference else "RDKit_Aggregate"
             refs = len(self.reference_mols)
             if prefix == "RDKit_Aggregate":
-                return [f"{prefix}_{refs}refs_{self.score_type}"]
-            return [f"{prefix}_{self.score_type}"]
-        return [f"RDKit_{name}" for name in self.group_names]
+                return [f"{prefix}_{refs}refs_{self.score_type}{suffix}"]
+            return [f"{prefix}_{self.score_type}{suffix}"]
+        return [f"RDKit_{name}{suffix}" for name in self.group_names]
 
     def _calculate_shape_score(self, query_mol: Chem.Mol, ref_mol: Chem.Mol) -> float:
-        return _score_single_reference(query_mol, ref_mol, self.score_type, self.use_colors)
+        return _score_single_reference(
+            query_mol,
+            ref_mol,
+            self.score_type,
+            self.use_colors,
+            self.optimization_mode,
+        )
 
     @staticmethod
     def _deduplicate_smiles(
@@ -391,7 +447,11 @@ class RDKitROCSScorer(Scorer):
                     for ref_idx in ref_indices:
                         ref_mol = self.reference_mols[ref_idx]
                         score = _score_single_reference(
-                            conf_mol, ref_mol, self.score_type, self.use_colors
+                            conf_mol,
+                            ref_mol,
+                            self.score_type,
+                            self.use_colors,
+                            self.optimization_mode,
                         )
                         if score > group_scores[group_idx]:
                             group_scores[group_idx] = score
@@ -485,6 +545,7 @@ class RDKitROCSScorer(Scorer):
                             self.group_to_indices,
                             self.score_type,
                             self.use_colors,
+                            self.optimization_mode,
                         ),
                     ) as pool:
                         if self.show_progress:

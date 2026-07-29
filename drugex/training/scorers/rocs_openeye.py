@@ -83,6 +83,7 @@ class OpenEyeROCSScorer(Scorer):
         show_progress: bool = True,
         n_jobs: int = -1,
         timeout: int = 300,
+        optimization_mode: str | None = None,
     ):
         """Initialize the OpenEye ROCS scorer.
 
@@ -106,6 +107,9 @@ class OpenEyeROCSScorer(Scorer):
                 OpenEye ROCS executes as one CLI subprocess, so values other
                 than -1 and 1 emit a warning and have no effect.
             timeout: Timeout in seconds for the ROCS subprocess
+            optimization_mode: Explicit alignment and returned-score objective.
+                Accepted values are ``shape``, ``combo``, and ``color``.
+                ``None`` preserves the legacy arguments and result keys.
 
         Raises:
             ImportError: If OpenEye toolkits are not available.
@@ -116,6 +120,30 @@ class OpenEyeROCSScorer(Scorer):
         if not OE_AVAILABLE:
             raise ImportError("OpenEye toolkits required")
 
+        if optimization_mode == "shape":
+            shape_only, score_type, color_optimize = (
+                True,
+                "ShapeTanimoto",
+                False,
+            )
+        elif optimization_mode == "combo":
+            shape_only, score_type, color_optimize = (
+                False,
+                "TanimotoCombo",
+                True,
+            )
+        elif optimization_mode == "color":
+            shape_only, score_type, color_optimize = (
+                False,
+                "ColorTanimoto",
+                True,
+            )
+        elif optimization_mode is not None:
+            raise ValueError(
+                "optimization_mode must be 'shape', 'combo', or 'color', "
+                f"got {optimization_mode!r}"
+            )
+
         self.conformer_generator = conformer_generator
 
         # Convert to list and validate
@@ -124,6 +152,7 @@ class OpenEyeROCSScorer(Scorer):
 
         self.score_type = score_type
         self._score_column = "ShapeTanimoto" if shape_only else score_type
+        self.optimization_mode = optimization_mode
         self.optimize = optimize
         self.color_optimize = color_optimize
         self.color_force_field = color_force_field
@@ -428,4 +457,9 @@ class OpenEyeROCSScorer(Scorer):
 
     def getKey(self) -> List[str]:
         """Return scorer identifier"""
-        return [f"ROCS_{name}" for name in self.queries.keys()]
+        suffix = (
+            ""
+            if self.optimization_mode is None
+            else f"_mode_{self.optimization_mode}"
+        )
+        return [f"ROCS_{name}{suffix}" for name in self.queries.keys()]

@@ -7,9 +7,19 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+from rdkit import Chem
+from rdkit.Chem import AllChem
 
-from drugex.training.scorers import rocs_openeye
+from drugex.training.scorers import rocs_cdpkit, rocs_openeye, rocs_rdkit
+from drugex.training.scorers.rocs_cdpkit import (
+    CDPKitROCSScorer,
+    _align_and_score_helper,
+)
 from drugex.training.scorers.rocs_openeye import OpenEyeROCSScorer
+from drugex.training.scorers.rocs_rdkit import (
+    RDKitROCSScorer,
+    _score_single_reference,
+)
 
 
 class _DummyConformerGenerator:
@@ -37,6 +47,7 @@ def _bare_scorer(**overrides):
         "timeout": 7,
         "show_progress": False,
         "queries": {"reference": ["reference.sdf"]},
+        "optimization_mode": None,
     }
     values.update(overrides)
     for name, value in values.items():
@@ -127,6 +138,291 @@ class OpenEyeROCSFollowupTests(unittest.TestCase):
                 )
 
         self.assertEqual(scorer.n_jobs, 1)
+
+
+class ROCSOptimizationModeTests(unittest.TestCase):
+    """Verify explicit modes while retaining the legacy path."""
+
+    @classmethod
+    def setUpClass(cls):
+        molecule = Chem.AddHs(Chem.MolFromSmiles("CCO"))
+        params = AllChem.ETKDGv3()
+        params.randomSeed = 7
+        if AllChem.EmbedMolecule(molecule, params) != 0:
+            raise RuntimeError("Could not build the portable ROCS test molecule")
+        cls.molecule = molecule
+
+    def test_rdkit_legacy_omits_opt_param(self):
+        with patch.object(
+            rocs_rdkit.rdShapeAlign,
+            "AlignMol",
+            return_value=(0.4, 0.2),
+        ) as align:
+            score = _score_single_reference(
+                self.molecule,
+                self.molecule,
+                "TanimotoCombo",
+                True,
+            )
+
+        self.assertAlmostEqual(score, 0.6)
+        self.assertNotIn("opt_param", align.call_args.kwargs)
+
+    def test_rdkit_modes_select_optimizer_and_component(self):
+        cases = {
+            "shape": ("shape", False, 1.0, 0.4),
+            "combo": ("TanimotoCombo", True, 0.5, 0.6),
+            "color": ("color", True, 0.0, 0.2),
+        }
+        for mode, (score_type, use_colors, opt_param, expected) in cases.items():
+            with self.subTest(mode=mode):
+                with patch.object(
+                    rocs_rdkit.rdShapeAlign,
+                    "AlignMol",
+                    return_value=(0.4, 0.2),
+                ) as align:
+                    score = _score_single_reference(
+                        self.molecule,
+                        self.molecule,
+                        score_type,
+                        use_colors,
+                        mode,
+                    )
+
+                self.assertAlmostEqual(score, expected)
+                self.assertEqual(align.call_args.kwargs["opt_param"], opt_param)
+                self.assertEqual(
+                    align.call_args.kwargs["useColors"], use_colors
+                )
+
+    def test_rdkit_explicit_combo_has_distinct_key(self):
+        legacy = RDKitROCSScorer(
+            _DummyConformerGenerator(),
+            self.molecule,
+            n_jobs=1,
+            show_progress=False,
+        )
+        explicit = RDKitROCSScorer(
+            _DummyConformerGenerator(),
+            self.molecule,
+            n_jobs=1,
+            show_progress=False,
+            optimization_mode="combo",
+        )
+
+        self.assertNotEqual(legacy.getKey(), explicit.getKey())
+        self.assertTrue(explicit.getKey()[0].endswith("_mode_combo"))
+
+    def test_rdkit_color_mode_changes_flexible_overlay(self):
+        reference = Chem.AddHs(
+            Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
+        )
+        reference_params = AllChem.ETKDGv3()
+        reference_params.randomSeed = 13
+        self.assertEqual(
+            AllChem.EmbedMolecule(reference, reference_params),
+            0,
+        )
+        AllChem.MMFFOptimizeMolecule(reference)
+
+        probe = Chem.AddHs(
+            Chem.MolFromSmiles("CN(C)CCCOc1ccc(C(=O)O)cc1")
+        )
+        probe_params = AllChem.ETKDGv3()
+        probe_params.randomSeed = 7
+        conformer_ids = AllChem.EmbedMultipleConfs(
+            probe,
+            numConfs=20,
+            params=probe_params,
+        )
+        self.assertEqual(len(conformer_ids), 20)
+        AllChem.MMFFOptimizeMoleculeConfs(probe)
+
+        legacy_color = _score_single_reference(
+            probe,
+            reference,
+            "color",
+            True,
+        )
+        explicit_color = _score_single_reference(
+            probe,
+            reference,
+            "color",
+            True,
+            "color",
+        )
+
+        self.assertGreater(explicit_color, legacy_color + 0.01)
+        self.assertGreaterEqual(explicit_color, 0.0)
+        self.assertLessEqual(explicit_color, 1.0)
+
+    def test_openeye_modes_map_flags_columns_and_keys(self):
+        cases = {
+            "shape": ("ShapeTanimoto", True, False),
+            "combo": ("TanimotoCombo", False, True),
+            "color": ("ColorTanimoto", False, True),
+        }
+        with (
+            patch.object(rocs_openeye, "OE_AVAILABLE", True),
+            patch.object(OpenEyeROCSScorer, "_validate_query_files"),
+            patch.object(rocs_openeye.shutil, "which", return_value="/opt/rocs"),
+        ):
+            for mode, (column, shape_only, color_optimize) in cases.items():
+                with self.subTest(mode=mode):
+                    scorer = OpenEyeROCSScorer(
+                        _DummyConformerGenerator(),
+                        {"reference": "reference.sdf"},
+                        optimization_mode=mode,
+                        show_progress=False,
+                    )
+
+                    self.assertEqual(scorer._score_column, column)
+                    self.assertEqual(scorer.shape_only, shape_only)
+                    self.assertEqual(scorer.color_optimize, color_optimize)
+                    self.assertTrue(
+                        scorer.getKey()[0].endswith(f"_mode_{mode}")
+                    )
+
+    def test_invalid_modes_fail_early(self):
+        with self.assertRaisesRegex(ValueError, "optimization_mode"):
+            RDKitROCSScorer(
+                _DummyConformerGenerator(),
+                self.molecule,
+                optimization_mode="invalid",
+                show_progress=False,
+            )
+        with (
+            patch.object(rocs_openeye, "OE_AVAILABLE", True),
+            self.assertRaisesRegex(ValueError, "optimization_mode"),
+        ):
+            OpenEyeROCSScorer(
+                _DummyConformerGenerator(),
+                {"reference": "reference.sdf"},
+                optimization_mode="invalid",
+                show_progress=False,
+            )
+        with (
+            patch.object(rocs_cdpkit, "CDPL_AVAILABLE", True),
+            self.assertRaisesRegex(ValueError, "optimization_mode"),
+        ):
+            CDPKitROCSScorer(
+                _DummyConformerGenerator(),
+                "reference.sdf",
+                optimization_mode="invalid",
+                show_progress=False,
+            )
+
+    def test_cdpkit_modes_select_scores_and_color_starts(self):
+        class StartGenerator:
+            last = None
+
+            def __init__(self):
+                self.color_starts = False
+                self.aligned_centers = False
+                StartGenerator.last = self
+
+            def genColorCenterStarts(self, enabled):
+                self.color_starts = enabled
+
+            def genForAlignedShapeCenters(self, enabled):
+                self.aligned_centers = enabled
+
+        class Aligner:
+            def setStartGenerator(self, generator):
+                self.generator = generator
+
+            def setMaxNumOptimizationIterations(self, iterations):
+                self.iterations = iterations
+
+            def setOptimizationStopGradient(self, gradient):
+                self.gradient = gradient
+
+            def addReferenceShape(self, reference):
+                self.reference = reference
+
+            def align(self, query):
+                return True
+
+            def getNumResults(self):
+                return 1
+
+            def getResult(self, index):
+                return object()
+
+        class ShapeModule:
+            GaussianShapeAlignment = Aligner
+            PrincipalAxesAlignmentStartGenerator = StartGenerator
+            calcShapeTanimotoScore = staticmethod(lambda _: 0.4)
+            calcTanimotoComboScore = staticmethod(lambda _: 0.6)
+            calcColorTanimotoScore = staticmethod(lambda _: 0.2)
+
+        expected = {"shape": 0.4, "combo": 0.6, "color": 0.2}
+        with patch.object(rocs_cdpkit, "CDPLShape", ShapeModule):
+            for mode, value in expected.items():
+                with self.subTest(mode=mode):
+                    score = _align_and_score_helper(object(), object(), mode)
+                    self.assertEqual(score, value)
+                    self.assertEqual(
+                        StartGenerator.last.color_starts, mode == "color"
+                    )
+                    self.assertEqual(
+                        StartGenerator.last.aligned_centers, mode == "color"
+                    )
+
+    @unittest.skipUnless(
+        rocs_cdpkit.CDPL_AVAILABLE,
+        "CDPKit is not available",
+    )
+    def test_cdpkit_modes_reach_worker_end_to_end(self):
+        from drugex.training.scorers.conformer_generators import (
+            RDKitConformerGenerator,
+        )
+
+        reference = Chem.AddHs(
+            Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
+        )
+        params = AllChem.ETKDGv3()
+        params.randomSeed = 13
+        self.assertEqual(AllChem.EmbedMolecule(reference, params), 0)
+        AllChem.MMFFOptimizeMolecule(reference)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reference_path = Path(tmpdir) / "reference.sdf"
+            with Chem.SDWriter(str(reference_path)) as writer:
+                writer.write(reference)
+
+            generator = RDKitConformerGenerator(
+                max_conformers=3,
+                max_isomers=1,
+                num_threads=1,
+                timeout=30,
+            )
+            scores = {}
+            keys = {}
+            for mode in ("shape", "combo", "color"):
+                scorer = CDPKitROCSScorer(
+                    generator,
+                    str(reference_path),
+                    show_progress=False,
+                    n_jobs=1,
+                    optimization_mode=mode,
+                )
+                scores[mode] = float(
+                    scorer.getScores(
+                        ["CN(C)CCCOc1ccc(C(=O)O)cc1"]
+                    )[0, 0]
+                )
+                keys[mode] = scorer.getKey()[0]
+
+        self.assertLessEqual(scores["shape"], 1.0)
+        self.assertLessEqual(scores["color"], 1.0)
+        self.assertLessEqual(scores["combo"], 2.0)
+        self.assertEqual(len(set(keys.values())), 3)
+        self.assertNotAlmostEqual(
+            scores["combo"],
+            scores["color"],
+            delta=1e-3,
+        )
 
 
 if __name__ == "__main__":
