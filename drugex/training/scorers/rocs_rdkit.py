@@ -21,7 +21,16 @@ def _score_single_reference(
     score_type: str,
     use_colors: bool,
 ) -> float:
-    """Compute best alignment score between a query molecule and one reference."""
+    """Compute best alignment score between a query molecule and one reference.
+
+    Uses rdShapeAlign.AlignMol which performs Gaussian shape overlay (same
+    algorithm family as OpenEye ROCS and CDPKit GaussianShapeAlignment).
+
+    ``AlignMol`` currently uses its default ``opt_param=1.0`` and therefore
+    optimizes the overlay for shape. Color and combo values are evaluated at
+    that shape-optimized pose. A caller must not interpret the legacy color
+    or combo result as proof that the pose was optimized for that objective.
+    """
     if query_mol is None or ref_mol is None:
         return 0.0
     if query_mol.GetNumConformers() == 0 or ref_mol.GetNumConformers() == 0:
