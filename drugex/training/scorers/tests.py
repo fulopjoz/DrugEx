@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import numpy as np
 from rdkit import Chem
-from rdkit.Chem import AllChem
+from rdkit.Chem import AllChem, rdMolTransforms
 
 from drugex.training.scorers import rocs_cdpkit, rocs_openeye, rocs_rdkit
 from drugex.training.scorers.rocs_cdpkit import (
@@ -53,6 +53,32 @@ def _bare_scorer(**overrides):
     for name, value in values.items():
         setattr(scorer, name, value)
     return scorer
+
+
+def _embedded_molecule(smiles: str, seed: int) -> Chem.Mol:
+    """Create one deterministic 3D conformer for pose-invariance tests."""
+    molecule = Chem.AddHs(Chem.MolFromSmiles(smiles))
+    params = AllChem.ETKDGv3()
+    params.randomSeed = seed
+    if AllChem.EmbedMolecule(molecule, params) != 0:
+        raise RuntimeError(f"Could not embed test molecule: {smiles}")
+    return molecule
+
+
+def _rigid_transform(molecule: Chem.Mol, seed: int) -> Chem.Mol:
+    """Return a copy under a deterministic proper rotation and translation."""
+    random = np.random.default_rng(seed)
+    matrix = random.normal(size=(3, 3))
+    rotation, triangular = np.linalg.qr(matrix)
+    rotation *= np.sign(np.diag(triangular))
+    if np.linalg.det(rotation) < 0:
+        rotation[:, 0] *= -1
+    transform = np.eye(4)
+    transform[:3, :3] = rotation
+    transform[:3, 3] = random.normal(size=3) * 10.0
+    output = Chem.Mol(molecule)
+    rdMolTransforms.TransformConformer(output.GetConformer(), transform)
+    return output
 
 
 class OpenEyeROCSFollowupTests(unittest.TestCase):
@@ -151,6 +177,14 @@ class ROCSOptimizationModeTests(unittest.TestCase):
         if AllChem.EmbedMolecule(molecule, params) != 0:
             raise RuntimeError("Could not build the portable ROCS test molecule")
         cls.molecule = molecule
+        cls.pose_reference = _embedded_molecule(
+            "COc1ccc2[nH]c(S(=O)Cc3ncc(C)c(OC)c3C)nc2c1",
+            1,
+        )
+        cls.pose_probe = _embedded_molecule(
+            "CCCCOc1ccc(CC(=O)NCc2ccccc2OC)cc1",
+            2,
+        )
 
     def test_rdkit_legacy_omits_opt_param(self):
         with patch.object(
@@ -255,6 +289,103 @@ class ROCSOptimizationModeTests(unittest.TestCase):
         self.assertGreater(explicit_color, legacy_color + 0.01)
         self.assertGreaterEqual(explicit_color, 0.0)
         self.assertLessEqual(explicit_color, 1.0)
+
+    def test_rdkit_score_is_rigid_pose_invariant(self):
+        scores = [
+            _score_single_reference(
+                _rigid_transform(self.pose_probe, seed),
+                self.pose_reference,
+                "TanimotoCombo",
+                True,
+                "combo",
+            )
+            for seed in range(6)
+        ]
+
+        self.assertLessEqual(max(scores) - min(scores), 5e-3)
+
+    def test_rdkit_score_is_atom_order_invariant(self):
+        renumbered = Chem.RenumberAtoms(
+            self.pose_probe,
+            list(reversed(range(self.pose_probe.GetNumAtoms()))),
+        )
+        original_score = _score_single_reference(
+            self.pose_probe,
+            self.pose_reference,
+            "TanimotoCombo",
+            True,
+            "combo",
+        )
+        renumbered_score = _score_single_reference(
+            renumbered,
+            self.pose_reference,
+            "TanimotoCombo",
+            True,
+            "combo",
+        )
+
+        self.assertAlmostEqual(
+            original_score,
+            renumbered_score,
+            delta=5e-3,
+        )
+
+    def test_rdkit_alignment_does_not_mutate_inputs(self):
+        probe_before = np.asarray(
+            self.pose_probe.GetConformer().GetPositions()
+        ).copy()
+        reference_before = np.asarray(
+            self.pose_reference.GetConformer().GetPositions()
+        ).copy()
+
+        _score_single_reference(
+            self.pose_probe,
+            self.pose_reference,
+            "TanimotoCombo",
+            True,
+            "combo",
+        )
+
+        np.testing.assert_allclose(
+            self.pose_probe.GetConformer().GetPositions(),
+            probe_before,
+        )
+        np.testing.assert_allclose(
+            self.pose_reference.GetConformer().GetPositions(),
+            reference_before,
+        )
+
+    def test_rdkit_self_alignment_is_pose_invariant(self):
+        scores = [
+            _score_single_reference(
+                _rigid_transform(self.pose_reference, 100 + seed),
+                self.pose_reference,
+                "shape",
+                False,
+                "shape",
+            )
+            for seed in range(4)
+        ]
+
+        self.assertGreaterEqual(min(scores), 0.99)
+        self.assertLessEqual(max(scores) - min(scores), 5e-3)
+
+    def test_rdkit_degenerate_geometry_fails_conservatively(self):
+        helium = Chem.MolFromSmiles("[He]")
+        conformer = Chem.Conformer(1)
+        conformer.SetAtomPosition(0, (0.0, 0.0, 0.0))
+        helium.AddConformer(conformer)
+
+        score = _score_single_reference(
+            helium,
+            helium,
+            "shape",
+            False,
+            "shape",
+        )
+
+        self.assertGreaterEqual(score, 0.0)
+        self.assertLessEqual(score, 1.0)
 
     def test_openeye_modes_map_flags_columns_and_keys(self):
         cases = {
