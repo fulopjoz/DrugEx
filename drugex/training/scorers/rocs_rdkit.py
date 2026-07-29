@@ -414,7 +414,8 @@ class RDKitROCSScorer(Scorer):
         if not unique_smiles:
             return scores
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        # Cleanup failures on network filesystems must not discard completed scores.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             conf_file = self.conformer_generator.genConformers(unique_smiles, tmpdir)
             if not os.path.exists(conf_file):
                 if self.show_progress:
