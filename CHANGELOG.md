@@ -4,6 +4,8 @@ From v3.4.8 to v3.4.9
 ## Fixes
 
 - Fix broken link to quick start tutorial in README
+- Add explicit shape, combo, and color optimization modes to ROCS scorers while preserving
+  omitted-mode behavior.
 
 ## Changes
 

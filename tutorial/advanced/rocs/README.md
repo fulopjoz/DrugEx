@@ -52,6 +52,45 @@ scorer = CDPKitROCSScorer(
 )
 ```
 
+## Shape, combo, and color objectives
+
+All three backends accept an optional `optimization_mode`:
+
+```python
+shape_scorer = RDKitROCSScorer(
+    conformer_generator=conformer_generator,
+    references="reference.sdf",
+    optimization_mode="shape",
+)
+combo_scorer = RDKitROCSScorer(
+    conformer_generator=conformer_generator,
+    references="reference.sdf",
+    optimization_mode="combo",
+)
+color_scorer = RDKitROCSScorer(
+    conformer_generator=conformer_generator,
+    references="reference.sdf",
+    optimization_mode="color",
+)
+```
+
+The accepted values and returned ranges are:
+
+| Mode | Returned value | Range |
+|------|----------------|-------|
+| `shape` | Shape Tanimoto | `[0, 1]` |
+| `combo` | Shape plus color Tanimoto | `[0, 2]` |
+| `color` | Color Tanimoto | `[0, 1]` |
+
+Omitting `optimization_mode` preserves the legacy backend behavior and result-column names.
+Explicit RDKit combo and color modes can produce different values because they optimize the
+overlay for the selected objective. Recalibrate thresholds before replacing a legacy scorer with
+an explicit mode.
+
+CDPKit does not expose a color-overlap gradient. Its explicit color mode adds color-feature-centred
+starting poses and selects the best color score; this is an approximation and is not expected to
+equal OpenEye or RDKit numerically.
+
 ## Quick Start
 
 ### 1. Fine-Tune Model
