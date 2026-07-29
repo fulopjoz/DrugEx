@@ -12,7 +12,7 @@ from rdkit import Chem
 from drugex.data.interfaces import DataSet
 from drugex.logs import logger
 from drugex.training.scorers.smiles import SmilesChecker
-from drugex.training.interfaces import Model   
+from drugex.training.interfaces import Model, _maybe_data_parallel
 from drugex.training.monitors import NullMonitor
 
 class Generator(Model, ABC):
@@ -410,7 +410,7 @@ class FragGenerator(Generator):
 
         # Duplicate of self.sample to allow dropping molecules and progress bar on the fly
         # without additional overhead caused by calling nn.DataParallel a few times
-        net = nn.DataParallel(self, device_ids=self.gpus)
+        net = _maybe_data_parallel(self, self.device, self.gpus)
 
         if progress:
             tqdm_kwargs.update({'total': num_samples, 'desc': 'Generating molecules'})
