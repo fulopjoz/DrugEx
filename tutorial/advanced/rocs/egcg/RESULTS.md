@@ -4,9 +4,9 @@ Branch: `egcg` (from `feature/shape-matching`)
 Design spec: `docs/superpowers/specs/2026-10-20-egcg-ligand-based-rl-design.md`
 (on `manuscript-evidence-rebuild`)
 
-Status: **pipeline built and smoke-tested; the production run has not been
-submitted.** No scientific result exists yet. Everything below the
-"Measurements" heading is apparatus, not findings.
+Status: **production run complete** (job 14053, 2026-10-20, exit 0).
+Primary endpoint: **negative** — shape similarity did not improve; synthetic
+accessibility improved substantially. See Measurements.
 
 ---
 
@@ -208,10 +208,121 @@ only.
 
 ## Measurements
 
-*(Empty. To be filled from `runs/provenance.json` and `runs/comparison.csv`
-after the production run. Report changes relative to baseline, including any
-that fail the pre-registered bounds, and including anything that failed
-outright.)*
+Job 14053, `lich-compute-emcpu-1`, 64 cores, 2 h 15 m, **exit status 0**, zero
+cell errors. `SMOKE_MODE: False` verified in `runs/provenance.json`. Branch
+`egcg` @ `af619251`. RDKit 2025.09.3, CPU. Gate 2 self-score **1.2597**
+(exactly the predicted ceiling); Gate 4 2.78 s/molecule across 62 workers.
+Calibrated ROCS threshold **0.7342** (85th percentile of a separate
+300-molecule calibration subset); SA cutoff raw 4.5 → modified 0.2689.
+
+### Headline: shape did not improve. Synthetic accessibility improved a lot.
+
+1,000 raw samples per arm, shape over valid molecules.
+
+| Quantity | Baseline | Reinforced | Δ |
+| --- | --- | --- | --- |
+| Median raw TanimotoCombo | 0.6401 | 0.6338 | **−0.006** |
+| p90 raw TanimotoCombo | 0.7502 | 0.7253 | **−0.025** |
+| Max raw TanimotoCombo | 0.9105 | 0.9257 | +0.015 |
+| Fraction ≥ threshold | 0.139 | 0.089 | −0.050 |
+| `desired_ratio` | 0.131 | 0.086 | −0.045 |
+| Median **raw SAscore** | 2.593 | **1.664** | **−0.929** |
+| Validity | 0.963 | 0.978 | +0.015 |
+| Uniqueness | 0.963 | 0.861 | −0.102 |
+| Invalid | 37 | 22 | −15 |
+| Cap violations | 19 | 0 | −19 |
+| Valid but ROCS = 0 | 36 | 1 | −35 |
+
+Pre-registered bounds:
+
+| Check | Result |
+| --- | --- |
+| Median raw TanimotoCombo increased | **FAIL** |
+| p90 raw TanimotoCombo increased | **FAIL** |
+| Median raw SA increase ≤ 0.5 | PASS (it *fell* 0.93) |
+| Validity ≥ 0.80 | PASS |
+| Uniqueness ≥ 0.50 | PASS |
+
+### Mechanism: the agent shrank the molecules
+
+| Quantity | Baseline | Reinforced | Δ |
+| --- | --- | --- | --- |
+| Median heavy atoms | 27 | 18 | **−9** |
+| Median MW | 377.5 | 254.3 | **−123** |
+| Median rings | 3 | 2 | −1 |
+
+EGCG has 33 heavy atoms and MW 458. The agent moved *away* from that size,
+toward small, simple, trivially synthesizable molecules. That is a coherent
+optimum, not a malfunction:
+
+- SA is **easy and unbounded in the rewarded direction**. `SmoothClippedScore`
+  keeps paying for lower SAscore indefinitely, and nothing in the environment
+  constrains size, so "make it smaller" is a globally winning move.
+- Shape similarity to a 33-heavy-atom reference is **hard**, and small
+  molecules cannot achieve it.
+- `ParetoCrowdingDistance` ranks by non-dominated fronts, so a molecule with
+  much better SA and marginally worse ROCS is non-dominated and well rewarded.
+  The population drifts along the cheap axis.
+
+The collapse in cap violations (19 → 0) and valid-but-zero scores (36 → 1) is
+the same effect seen from another angle: smaller molecules stopped tripping the
+heavy-atom and rotatable-bond caps.
+
+Uniqueness fell 0.963 → 0.861 — above the 0.50 bound, so **not** mode collapse
+by the pre-registered definition, but a real narrowing consistent with
+convergence onto a smaller chemotype.
+
+### What did improve
+
+The *best* molecules got slightly better (max 0.9105 → 0.9257, i.e. 73% of the
+1.2597 ceiling), so the agent can find EGCG-like shapes; it just is not
+rewarded enough for doing so. Top reinforced molecules by raw TanimotoCombo:
+
+| SMILES | TanimotoCombo | raw SA |
+| --- | --- | --- |
+| `COc1ccc(Cc2ccccc2OC2CC(O)C(O)C(O)C2)cc1` | 0.9257 | 2.97 |
+| `COc1ccccc1N1C(=O)c2ccccc2NC1Sc1ccccc1` | 0.9199 | 2.77 |
+| `Cc1ccccc1OC(c1ccccc1)C1(Br)C(=O)Sc2ccccc21` | 0.8733 | 3.36 |
+
+The first is recognisably EGCG-adjacent: a polyhydroxylated ring linked through
+an ether to an aromatic system.
+
+### Training log
+
+`desired_ratio` per epoch oscillates between 0.0 and 0.24 with no trend. It is
+computed on `n_samples/10` = **26 molecules**, so it moves in steps of ~0.04 —
+two molecules. It is noise at this sample size and should not be read as a
+learning curve. `avg_amean` drifts up weakly (0.775 → ~0.80), consistent with
+the SA gain rather than shape.
+
+Best epoch by `desired_ratio` was 11, and the monitor's checkpoint reflects
+that. **It was not evaluated** — the final-epoch weights were, as designed.
+
+### Verdict
+
+Under this configuration, unconstrained RL with ROCS + SA against a single EGCG
+reference **does not improve shape similarity**; it optimizes synthetic
+accessibility by reducing molecular size. The pipeline is sound — every gate
+passed and the apparatus behaved exactly as specified — so this is a result
+about the *objective design*, not a bug.
+
+Single seed, descriptive. No significance test, no causal claim beyond this
+run.
+
+### What this implies for a next experiment
+
+Not performed; listed so the finding is actionable rather than merely negative.
+
+1. **Constrain or cap the SA reward.** A one-sided unbounded objective against
+   a hard one will win every time. Clipping SA desirability at a "good enough"
+   raw value (e.g. flat below 3.0) would stop paying for further shrinkage.
+2. **Add a size or MW term**, or score shape in a size-normalised way, so that
+   drifting away from the reference's volume is not free.
+3. **Reconsider the reward scheme for this pair.** `WeightedSum` with explicit
+   weights would let shape be weighted above SA; Pareto ranking deliberately
+   refuses to make that trade and is therefore the wrong tool when one
+   objective is far cheaper than the other.
+4. **Replicate across seeds** before trusting even this negative result.
 
 Pre-registered bounds, fixed before any run:
 
