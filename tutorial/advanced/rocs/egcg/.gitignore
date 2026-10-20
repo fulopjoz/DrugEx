@@ -1,0 +1,5 @@
+# Run artifacts: regenerable, large, and machine-specific.
+runs/
+panels/
+smoke_out/
+logs/
