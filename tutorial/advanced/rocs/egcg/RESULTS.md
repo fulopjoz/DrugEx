@@ -114,6 +114,51 @@ Invalid molecules are forced to 0.0 by `getScores`; cap-rejected molecules score
 counted separately. The remainder is reported as "valid but ROCS == 0" and
 explicitly **not** attributed to either cause.
 
+### Conformer threads and scorer workers do NOT multiply
+
+Job 14052 was submitted with 190 cores and ran at **load average 1.00** for
+nine minutes before being killed — one core busy, 189 idle. PBS's own
+accounting hid it (`cput = 4s` while the kernel process showed 9 min of CPU);
+only `ps` and `uptime` on the execution node revealed the truth.
+
+The cause was a `CONFORMER_NUM_THREADS = 1` "oversubscription guard" resting on
+a false premise. In `RDKitROCSScorer.getScores` the stages are **sequential,
+not concurrent**: `genConformers` runs to completion in the main process and
+writes an SDF, and only then does the alignment `Pool` spin up. They never
+overlap, so they cannot oversubscribe each other. The guard simply pinned the
+most expensive stage to a single core.
+
+Measured on 20 molecules at `MAX_CONFORMERS=30`:
+
+| `num_threads` | s/molecule |
+| --- | --- |
+| 1 | 9.33 |
+| 0 (all cores) | 4.58 |
+
+A 2× win, not 30×. `EmbedMultipleConfs` threads the embedding, but the
+per-conformer MMFF loop is serial and molecules are iterated serially
+(`for i, smi in enumerate(smiles_list)`). **Conformer generation has a
+~4.6 s/molecule floor that no number of cores can lower**; only alignment
+scales with `n_jobs`.
+
+Consequences: `CONFORMER_NUM_THREADS = 0`; the CPU request dropped from 190 to
+**64**, since asking for 190 cores for a workload that can use a few dozen
+blocks other users for nothing; and `RL_EPOCHS` 30 → 20 (~7,900 molecules,
+≈11 h at the measured rate). After the fix the same job ran at load average
+~15 with 24 min of CPU in 76 s of walltime.
+
+### A failed scorer pool would have been invisible
+
+The alignment `Pool` sits in a `try/except` that falls back to
+`_score_sequential`, and the warning prints **only when `show_progress=True`**
+— which is off, for readability. A failed pool would therefore downgrade an
+entire run to one core and still exit 0.
+
+**Gate 4** now measures per-molecule throughput against the conformer floor and
+raises above 3× it, rather than trusting the configuration. Note that in
+`EGCG_SMOKE=1` mode the gate passes trivially (3 conformers, far below the
+30-conformer floor); it is meaningful only at production settings.
+
 ### The interpreter, not just the module path, needed a gate
 
 The env's `drugex` is installed **editable against the main checkout**, which
@@ -135,7 +180,8 @@ notebook metadata and the PBS script, and having Gate 0 assert
 | 0 | interpreter, module paths, revision, asserted hashes, absence of `optimization_mode` | passes |
 | 1 | reference is one parsable 3D non-degenerate molecule, 33 heavy atoms | passes |
 | 2 | EGCG self-score ≥ 1.0, dissimilar control ≤ 0.6 | passes |
-| 3 | calibration subset not degenerate (validity, non-zero max) | passes in smoke mode |
+| 3 | calibration subset not degenerate (validity, non-zero max) | passes |
+| 4 | scoring throughput vs the conformer floor (catches silent serial fallback) | passes |
 
 ## Reproducing
 
