@@ -130,18 +130,40 @@ GATE2_MIN_SELF_SCORE = 1.0
 GATE2_CONTROL_SMILES = "c1ccccc1"
 GATE2_MAX_CONTROL_SCORE = 0.6
 
-# OVERSUBSCRIPTION GUARD (spec 15). num_threads and n_jobs MULTIPLY: the
-# tutorial's num_threads=0 (all cores) with n_jobs=-1 (all cores) spawns
-# cores^2 workers. Conformer generation is single-threaded here; parallelism
-# comes from the scorer's process pool only.
-CONFORMER_NUM_THREADS = 1
+# CONFORMER THREADS -- corrected 2026-10-20 after a 190-core job ran on ONE core.
+#
+# An earlier version set this to 1 as an "oversubscription guard", on the belief
+# that num_threads and n_jobs multiply. THEY DO NOT, and the guard was actively
+# harmful. In RDKitROCSScorer.getScores the stages are SEQUENTIAL, not
+# concurrent:
+#     1. conformer_generator.genConformers(...)  <- main process, no pool yet
+#     2. Pool(n_jobs) for shape/colour alignment <- conformers already on disk
+# So they never run at the same time and cannot oversubscribe each other.
+# Setting num_threads=1 simply pinned the single most expensive stage to one
+# core while the other 189 idled (measured: job 14052, load average 1.00).
+#
+# What num_threads=0 actually buys: RDKitConformerGenerator.genConformers loops
+# molecules SERIALLY (`for i, smi in enumerate(smiles_list)`), and
+# EmbedMultipleConfs(numThreads=...) parallelises only across the conformers of
+# one molecule. So the usable parallelism in this stage is bounded by
+# MAX_CONFORMERS (~30), not by the core count, and the per-conformer MMFF loop
+# stays serial. It is still far better than 1.
+#
+# OMP_NUM_THREADS=1 is still exported by the notebook and the PBS script: that
+# constrains torch/BLAS, not RDKit's own thread pool, so the RNN stays
+# single-threaded while conformer embedding is free to use the node.
+CONFORMER_NUM_THREADS = 0   # 0 = all available cores
 SCORER_N_JOBS = -1          # notebook overrides from PBS_NCPUS (minus reserve)
 
 # ============================================================================
 # RL parameters
 # ============================================================================
 
-RL_EPOCHS = 30
+# 20 epochs at RL_N_SAMPLES=256 is ~5,100 molecules; with calibration (300),
+# baseline (1,000), evaluation (1,000) and RL-internal validation (~510) the run
+# is ~7,900 molecules. At the MEASURED ~5 s/molecule that is ~11 h, inside the
+# 48 h walltime with room to spare.
+RL_EPOCHS = 20
 RL_EPSILON = 0.2
 RL_N_SAMPLES = 256
 
@@ -165,6 +187,15 @@ N_CALIBRATION = 300
 N_BASELINE = 1000
 N_EVALUATION = 1000
 GEN_BATCH_SIZE = 64
+
+# MEASURED cost, 2026-10-20 on lich-compute (20 molecules, MAX_CONFORMERS=30):
+#   conformer generation, num_threads=1 : 9.33 s/molecule
+#   conformer generation, num_threads=0 : 4.58 s/molecule
+# Conformer generation runs SERIALLY across molecules in the main process, so
+# this is a floor that extra cores cannot lower; only shape/colour alignment
+# scales with SCORER_N_JOBS. Used by the notebook's Gate 4 to detect a silent
+# fall-back to sequential alignment.
+MEASURED_CONFORMER_SECONDS_PER_MOL = 4.58
 
 # ============================================================================
 # Smoke-test mode

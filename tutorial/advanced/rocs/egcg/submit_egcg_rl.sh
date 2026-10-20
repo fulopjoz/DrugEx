@@ -1,7 +1,7 @@
 #!/bin/bash
 #PBS -N egcg_rl
 #PBS -q cpu
-#PBS -l select=1:ncpus=190:mem=120gb:feature=cpu
+#PBS -l select=1:ncpus=64:mem=64gb:feature=cpu
 #PBS -l walltime=48:00:00
 #PBS -o /home/fulopj/drx-run/DrugEx/.worktrees/egcg/tutorial/advanced/rocs/egcg/logs/
 #PBS -e /home/fulopj/drx-run/DrugEx/.worktrees/egcg/tutorial/advanced/rocs/egcg/logs/
@@ -21,7 +21,15 @@
 #   (in-6..18) carry only 48 (in-18: 32), are saturated by other users, and
 #   several are offline. lich-compute-emgpu has 192 cores AND GPUs, but it is
 #   the only such node, so a CPU-only job should not occupy it.
-#   ncpus=190 of 192 leaves 2 CPUs free for interactive SSH (standing rule).
+#
+# WHY 64 CORES, NOT 190 (corrected after job 14052):
+#   Conformer generation runs SERIALLY across molecules in the main process and
+#   only EmbedMultipleConfs is threaded, so extra cores cannot lower its cost.
+#   Measured on 20 molecules at MAX_CONFORMERS=30: 9.33 s/mol at num_threads=1
+#   vs 4.58 s/mol at num_threads=0 -- a 2x win, not 30x. Only shape/colour
+#   alignment scales with the scorer pool. Requesting 190 cores for a workload
+#   that can use a few dozen blocks other users for no gain; 64 comfortably
+#   covers the alignment stage and leaves the 192-core nodes available.
 #
 # PBS WALLTIME CANNOT BE EXTENDED. It is requested here, up front. The
 # notebook's cost projection can only decide whether to proceed WITHIN this
