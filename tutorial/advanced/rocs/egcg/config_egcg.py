@@ -32,7 +32,7 @@ from drugex.training.scorers.rocs_rdkit import RDKitROCSScorer
 HERE = Path(__file__).resolve().parent
 WORKTREE = HERE.parents[3]                      # .../.worktrees/egcg
 REFERENCE_SDF = HERE / "EGCG_reference.sdf"
-OUTPUT_DIR = HERE / "runs"
+OUTPUT_DIR = HERE / "runs"          # overridden to runs_smoke/ in SMOKE mode
 PANEL_DIR = HERE / "panels"
 
 # --- MACHINE-LOCAL ABSOLUTE PATH -------------------------------------------
@@ -159,13 +159,24 @@ SCORER_N_JOBS = -1          # notebook overrides from PBS_NCPUS (minus reserve)
 # RL parameters
 # ============================================================================
 
-# 20 epochs at RL_N_SAMPLES=256 is ~5,100 molecules; with calibration (300),
-# baseline (1,000), evaluation (1,000) and RL-internal validation (~510) the run
-# is ~7,900 molecules. At the MEASURED ~5 s/molecule that is ~11 h, inside the
-# 48 h walltime with room to spare.
-RL_EPOCHS = 20
+# PRODUCTION v2 (user decision, 2026-10-20): raise the RL budget as well as the
+# evaluation sample, to test whether more exploration eventually finds large
+# EGCG-like molecules rather than continuing to shrink.
+#
+# Costed from the v1 run's MEASURED rates:
+#   calibration  1,000 x 4.1 s  =  1.1 h   (baseline-sized molecules)
+#   baseline    10,000 x 4.1 s  = 11.4 h
+#   RL          30,720 x ~2.5 s = 21.3 h   (+ ~3,060 validation molecules)
+#   evaluation  10,000 x ~2.5 s =  7.0 h   (reinforced molecules are smaller)
+#                                 -------
+#                                  ~43 h   inside a 96 h walltime
+# Note the rate depends on molecule SIZE: the v1 baseline ran at 4.1 s/mol
+# (27 heavy atoms) while RL averaged 0.98 s/mol once the agent had shrunk them.
+# If this run does NOT shrink, RL will be slower than costed -- hence the
+# EGCG_BUDGET_HOURS guard, which aborts before the walltime kills us mid-run.
+RL_EPOCHS = 60
 RL_EPSILON = 0.2
-RL_N_SAMPLES = 256
+RL_N_SAMPLES = 512
 
 # fit() decoupling (spec 6). reload_interval > epochs stops best-state resets;
 # min_epochs == epochs and patience > epochs stop criterion-based early
@@ -183,9 +194,9 @@ RL_CRITERIA = "desired_ratio"        # recorded; inert given the settings above
 # Stages 1a and 1b are DISTINCT subsets (spec 12): calibrating the threshold
 # and measuring the baseline on the same molecules would make the baseline
 # desired_ratio a tautology of the chosen percentile.
-N_CALIBRATION = 300
-N_BASELINE = 1000
-N_EVALUATION = 1000
+N_CALIBRATION = 1000
+N_BASELINE = 10000
+N_EVALUATION = 10000
 GEN_BATCH_SIZE = 64
 
 # MEASURED cost, 2026-10-20 on lich-compute (20 molecules, MAX_CONFORMERS=30):
@@ -224,6 +235,13 @@ if SMOKE:
     # conformers the self-score is lower, so relax the gate rather than let a
     # smoke test fail on a correctly working pipeline.
     GATE2_MIN_SELF_SCORE = 0.8
+    # Smoke output must NEVER share the production results directory: a job that
+    # died mid-way would otherwise leave meaningless smoke numbers in a folder
+    # labelled as results. (v1 did exactly this; the files were only overwritten
+    # because the run happened to finish.)
+    OUTPUT_DIR = HERE / "runs_smoke"
+    MONITOR_BASE = OUTPUT_DIR / RUN_NAME
+    FINAL_CHECKPOINT = OUTPUT_DIR / f"{RUN_NAME}_final_epoch.pkg"
 
 # ============================================================================
 # Thresholds -- reporting criteria only, NOT optimization parameters

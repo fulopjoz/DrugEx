@@ -24,7 +24,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 
-FIG_DIR = Path(__file__).resolve().parent / "panels"
+# Panels follow the run's output directory, so a smoke run cannot overwrite
+# production figures (same contamination class as the runs/ directory).
+try:
+    import config_egcg as _cfg
+    FIG_DIR = _cfg.PANEL_DIR if not _cfg.SMOKE else _cfg.OUTPUT_DIR / "panels"
+except Exception:
+    FIG_DIR = Path(__file__).resolve().parent / "panels"
 
 # Arm palette: baseline = muted cool, reinforced = warm. Encodes before/after.
 ARM = {"baseline": "#4363d8", "reinforced": "#f58231"}

@@ -2,7 +2,7 @@
 #PBS -N egcg_rl
 #PBS -q cpu
 #PBS -l select=1:ncpus=64:mem=64gb:feature=cpu
-#PBS -l walltime=48:00:00
+#PBS -l walltime=96:00:00
 #PBS -o /home/fulopj/drx-run/DrugEx/.worktrees/egcg/tutorial/advanced/rocs/egcg/logs/
 #PBS -e /home/fulopj/drx-run/DrugEx/.worktrees/egcg/tutorial/advanced/rocs/egcg/logs/
 
@@ -82,8 +82,21 @@ mkdir -p "$SCRATCH_DIR"
 export TMPDIR="$SCRATCH_DIR"
 trap 'rm -rf "$SCRATCH_DIR"' EXIT
 
+# v2 sizing: ~43 h estimated from v1's measured rates (see config_egcg.py).
 # Stop early rather than overrun the allocation (leave headroom for eval+plots).
-export EGCG_BUDGET_HOURS="${EGCG_BUDGET_HOURS:-40}"
+# The estimate assumes the agent shrinks molecules as it did in v1; if it does
+# NOT, RL runs at the slower large-molecule rate and the guard fires first.
+export EGCG_BUDGET_HOURS="${EGCG_BUDGET_HOURS:-80}"
+
+# --- disk guard -------------------------------------------------------------
+# 10,000 molecules x up to 30 conformers x up to 4 isomers is a large temporary
+# SDF. Fail now, not at hour 11.
+_free_gb=$(df -BG --output=avail "/scratch/$USER" 2>/dev/null | tail -1 | tr -dc '0-9')
+if [ -n "${_free_gb:-}" ] && [ "$_free_gb" -lt 200 ]; then
+    echo "ABORT: only ${_free_gb}GB free on /scratch/$USER; need >=200GB" >&2
+    exit 1
+fi
+echo "scratch free: ${_free_gb:-unknown} GB"
 
 PY=/home/fulopj/miniconda3/envs/drugex/bin/python
 STAMP=$(date +%Y%m%d_%H%M%S)
