@@ -1,0 +1,114 @@
+{
+  "timestamp": "2026-10-20T18:26:11+0200",
+  "host": "lich-compute-emcpu-1.vscht.cz",
+  "python": "3.12.3",
+  "executable": "/home/fulopj/miniconda3/envs/drugex/bin/python",
+  "kernel": "interactive",
+  "torch": "2.9.1+cu130",
+  "worktree": "/home/fulopj/drx-run/DrugEx/.worktrees/egcg",
+  "branch": "egcg",
+  "commit": "af619251f47c550ed6ca4dd6fa394374a8d7336b",
+  "dirty": true,
+  "drugex_module": "/home/fulopj/drx-run/DrugEx/.worktrees/egcg/drugex/__init__.py",
+  "config": {
+    "seed": 42,
+    "rl_epochs": 20,
+    "rl_epsilon": 0.2,
+    "rl_n_samples": 256,
+    "rl_reload_interval": 21,
+    "rl_patience": 21,
+    "rl_min_epochs": 20,
+    "rl_criteria": "desired_ratio",
+    "max_conformers": 30,
+    "max_isomers": 4,
+    "max_heavy_atoms": 45,
+    "max_rotatable_bonds": 15,
+    "conformer_num_threads": 0,
+    "n_calibration": 300,
+    "n_baseline": 1000,
+    "n_evaluation": 1000,
+    "rocs_calibration_percentile": 85.0,
+    "raw_sa_cutoff": 4.5,
+    "sa_threshold_modified": 0.2689414213699951,
+    "campaign_sa_0.1_raw_equivalent": 5.09861228866811,
+    "colour_typing": "scorer defaults (inject_color=False, color_ff='default')",
+    "rocs_scale": "raw TanimotoCombo 0-2, no modifier",
+    "reward_scheme": "ParetoCrowdingDistance",
+    "SMOKE_MODE": false
+  },
+  "rdkit": "2025.09.3",
+  "hashes": {
+    "pretrained .pkg": "34dbc312454635e374dee6ce61897fc4889b2598cddaf292fd243f41c2369f7f",
+    "pretrained .vocab": "5da364a8b64662462c5b7a7b29c3cbe3c4aad4aaf982ec1ba339ffa6735154ce",
+    "reference .sdf": "39bce6edd56e661c049ac42f2e18e27648d6c6080673ceb292cccb16ec1c02bb"
+  },
+  "reference_descriptors": {
+    "formula": "C22H18O11",
+    "mw": 458.38,
+    "hbd": 8,
+    "hba": 11,
+    "tpsa": 197.4,
+    "heavy_atoms": 33,
+    "rotatable_bonds": 3,
+    "murcko_heavy_atoms": 25,
+    "canonical_smiles": "O=C(O[C@@H]1Cc2c(O)cc(O)cc2O[C@@H]1c1cc(O)c(O)c(O)c1)c1cc(O)c(O)c(O)c1"
+  },
+  "gate2": {
+    "self_score": 1.2596791432483925,
+    "control_score": 0.26417907434356724
+  },
+  "device": "cpu",
+  "gate4": {
+    "seconds_per_molecule": 2.7777798970540366,
+    "n_jobs": 62,
+    "conformer_threads": 0
+  },
+  "thresholds": {
+    "rocs_raw": 0.7342418863306954,
+    "rocs_percentile": 85.0,
+    "sa_raw_cutoff": 4.5,
+    "sa_modified": 0.2689414213699951
+  },
+  "checkpoints": {
+    "monitor_best": "/home/fulopj/drx-run/DrugEx/.worktrees/egcg/tutorial/advanced/rocs/egcg/runs/EGCG_rdkit_reinforced.pkg",
+    "final_epoch_evaluated": "/home/fulopj/drx-run/DrugEx/.worktrees/egcg/tutorial/advanced/rocs/egcg/runs/EGCG_rdkit_reinforced_final_epoch.pkg",
+    "rl_minutes": 83.574589463075
+  },
+  "metrics": {
+    "baseline": {
+      "n_raw_samples": 1000,
+      "validity": 0.963,
+      "uniqueness": 0.963,
+      "desired_ratio": 0.131,
+      "median_rocs": 0.6400930259093105,
+      "p90_rocs": 0.7502433406303208,
+      "median_sa_raw": 2.5933020591276996,
+      "frac_of_ceiling": 0.5081313216712793,
+      "n_invalid": 37,
+      "n_cap_violation": 19,
+      "n_valid_but_zero": 36,
+      "rocs_threshold_used": 0.7342418863306954
+    },
+    "reinforced": {
+      "n_raw_samples": 1000,
+      "validity": 0.978,
+      "uniqueness": 0.861,
+      "desired_ratio": 0.086,
+      "median_rocs": 0.6337535835754735,
+      "p90_rocs": 0.7252556292700411,
+      "median_sa_raw": 1.6637986349402958,
+      "frac_of_ceiling": 0.5030988200170465,
+      "n_invalid": 22,
+      "n_cap_violation": 0,
+      "n_valid_but_zero": 1,
+      "rocs_threshold_used": 0.7342418863306954
+    },
+    "bound_checks": {
+      "median raw TanimotoCombo increased": false,
+      "p90 raw TanimotoCombo increased": false,
+      "median raw SA increase <= 0.5": true,
+      "validity >= 0.8": true,
+      "uniqueness >= 0.5": true
+    }
+  }
+}

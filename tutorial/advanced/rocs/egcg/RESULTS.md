@@ -420,10 +420,12 @@ contain 2,264 distinct molecules — ~4.4 copies each on average:
 
 Most-repeated molecules are small aromatic amides and biphenyl ethers, e.g.
 `COc1ccc(-c2ccccc2OCc2ccccc2F)cc1` (combo 0.826, 100 copies) and
-`O=C(Nc1ccccc1C(=O)Nc1ccccc1)c1ccccc1` (0.776, 100 copies). Several distinct
-molecules appear exactly 100 or 83 times, which is suspicious enough to flag
-as a possible sampling artifact rather than pure model behaviour — worth
-checking before any publication claim.
+`O=C(Nc1ccccc1C(=O)Nc1ccccc1)c1ccccc1` (0.776, 100 copies). An earlier draft flagged the fact that three molecules appear exactly 100
+times and two exactly 83 as a possible sampling artifact. **That flag was
+wrong and is withdrawn.** The full repeat distribution is an ordinary heavy
+tail — max 100, mean 4.37, median 1, with 1,444 molecules appearing exactly
+once — and three molecules tied at the top of a sparse tail is unremarkable.
+No cap is involved.
 
 ### Size still fell, but shape rose anyway
 
