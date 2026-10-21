@@ -4,9 +4,14 @@ Branch: `egcg` (from `feature/shape-matching`)
 Design spec: `docs/superpowers/specs/2026-10-20-egcg-ligand-based-rl-design.md`
 (on `manuscript-evidence-rebuild`)
 
-Status: **production run complete** (job 14053, 2026-10-20, exit 0).
-Primary endpoint: **negative** — shape similarity did not improve; synthetic
-accessibility improved substantially. See Measurements.
+Status: **two production runs complete.**
+
+- **v1** (job 14053, 20 epochs x 256, n=1,000): shape did **not** improve.
+- **v2** (job 14054, 60 epochs x 512, n=10,000): shape **did** improve,
+  robustly — but **uniqueness collapsed to 0.226**, failing the pre-registered
+  diversity bound. Scored as **mode collapse, not success**.
+
+See Measurements (v1) and Measurements — v2 (below it).
 
 ---
 
@@ -340,3 +345,123 @@ success**.
 Single seed, descriptive: no significance test is applied and no causal claim
 is made beyond this run. Multi-seed replication is the prerequisite to any
 stronger claim.
+
+
+---
+
+## Measurements — v2 (raised RL budget)
+
+Job 14054, `lich-compute-emcpu-1`, 64 cores, **10 h 44 m** (vs ~43 h costed),
+195 h CPU, **exit 0**, zero cell errors. `SMOKE_MODE: False`, commit
+`a15f87fe`. 60 epochs x 512; calibration 1,000; baseline and evaluation 10,000
+each. Gate 2 self-score 1.2597; Gate 4 2.78 s/molecule. Calibrated threshold
+0.7289. `reload_interval`/`patience`/`min_epochs` = 61/61/60, so the threshold
+still could not select weights.
+
+The run finished in a quarter of the costed time because the agent again
+shrank the molecules, and small molecules are far cheaper to embed. The cost
+model's dependence on that behaviour was stated in advance.
+
+### Shape improved — and the author's prediction was wrong
+
+Before this run I predicted that raising the RL budget on an unbalanced
+objective would amplify the size drift and *not* improve shape. **That was
+wrong.** The user's hypothesis — that more exploration would find better
+matches — is the one the data supports.
+
+| Quantity | Baseline | Reinforced | Δ |
+| --- | --- | --- | --- |
+| Median raw TanimotoCombo | 0.6429 | **0.7083** | **+0.0654** |
+| p90 raw TanimotoCombo | 0.7497 | **0.8487** | **+0.0990** |
+| `desired_ratio` | 0.134 | **0.451** | +0.317 |
+| Median raw SAscore | 2.639 | 1.425 | −1.214 |
+| Validity | 0.955 | 0.990 | +0.035 |
+| **Uniqueness** | 0.955 | **0.226** | **−0.728** |
+| Invalid | 447 | 98 | −349 |
+| Cap violations | 170 | 0 | −170 |
+| Valid but ROCS = 0 | 282 | 1 | −281 |
+
+Bootstrap 95% CI on the median difference: **[+0.0589, +0.0725]**, does not
+cross zero. At n=10,000 this is well resolved, unlike v1's
+[−0.0151, +0.0028].
+
+**The gain survives deduplication**, so it is not an artifact of repeating a
+few good molecules: on unique molecules only, baseline median 0.6429
+(n=9,546) vs reinforced 0.6976 (n=2,264), **Δ +0.0546**.
+
+The reinforced median sits at **56.2%** of the measured 1.2597 ceiling, up from
+51.0%.
+
+### But diversity failed the pre-registered bound
+
+| Check | Result |
+| --- | --- |
+| Median raw TanimotoCombo increased | PASS |
+| p90 raw TanimotoCombo increased | PASS |
+| Median raw SA increase ≤ 0.5 | PASS |
+| Validity ≥ 0.80 | PASS |
+| **Uniqueness ≥ 0.50** | **FAIL (0.226)** |
+
+The rule fixed before any run was explicit: *a median shape increase with
+uniqueness below 0.50 is mode collapse, not success.* **That rule applies
+here.** Four of five bounds pass and the headline number is the best this
+project has produced, which is exactly the situation the bound was written to
+survive.
+
+**It is a soft collapse, not a single-molecule one.** 9,902 valid samples
+contain 2,264 distinct molecules — ~4.4 copies each on average:
+
+| | share of valid output |
+| --- | --- |
+| Top 1 molecule | 1.0% |
+| Top 5 | 4.7% |
+| Top 10 | 8.3% |
+| Top 50 | 28.4% |
+
+Most-repeated molecules are small aromatic amides and biphenyl ethers, e.g.
+`COc1ccc(-c2ccccc2OCc2ccccc2F)cc1` (combo 0.826, 100 copies) and
+`O=C(Nc1ccccc1C(=O)Nc1ccccc1)c1ccccc1` (0.776, 100 copies). Several distinct
+molecules appear exactly 100 or 83 times, which is suspicious enough to flag
+as a possible sampling artifact rather than pure model behaviour — worth
+checking before any publication claim.
+
+### Size still fell, but shape rose anyway
+
+| | Baseline | Reinforced |
+| --- | --- | --- |
+| Median heavy atoms | 27 | 20 |
+| Median MW | 384.5 | 266.1 |
+
+So v1's shrinkage was not the whole story. With three times the budget the
+agent found *small* molecules that nonetheless match EGCG's shape far better —
+combo 0.78–0.83 at ~20 heavy atoms. Shrinking and shape-matching turned out
+not to be mutually exclusive, which is precisely what v1's shorter run could
+not reveal.
+
+### Trajectory
+
+From `epoch_trajectory.csv` (per-epoch validation sample, ~50 molecules):
+median heavy atoms drops 23 → ~18–20 within the first dozen epochs and then
+oscillates without recovering. Median TanimotoCombo oscillates 0.63–0.73 with a
+weak upward drift late (0.726 at epoch 43, 0.729 at 55, 0.734 at 60). The size
+drift does **not** reverse; the shape gain accrues on top of it.
+
+### Verdict
+
+Raising the RL budget **does** improve shape similarity against a single EGCG
+reference, robustly and resolvably — but at this budget it also costs
+three-quarters of the output diversity, which the pre-registered rule scores as
+mode collapse.
+
+Single seed, descriptive. No causal claim beyond this run.
+
+### What follows
+
+1. **Diversity is now the binding constraint, not shape.** The obvious next
+   lever is `epsilon` (exploration) and/or a diversity term; `ParetoCrowdingDistance`
+   already carries crowding distance, so the knob to examine first is epsilon,
+   not the reward scheme.
+2. **Check the exact-100/83 repeat counts** before trusting the uniqueness
+   figure — it may be a sampling artifact.
+3. Replicate across seeds. A single run cannot separate "more budget improves
+   shape" from "this seed found a good basin".
