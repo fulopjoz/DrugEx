@@ -74,6 +74,22 @@ Three production runs. Full detail in [`RESULTS.md`](RESULTS.md).
 pre-registered criterion — shape similarity improves *and* output diversity is
 preserved.
 
+### Which notebook produced which run
+
+`egcg_rl.ipynb` was **edited in place** between runs, so the copy in this
+directory is the **v3** version. Nothing is lost — each run's fully executed
+notebook is kept with its outputs, and each recorded the commit it ran from:
+
+| Run | Executed notebook | Commit | Recover the source with |
+|---|---|---|---|
+| v1 | `runs_v1_20epochs/executed_egcg_rl_20261020_182604.ipynb` | `af619251` | `git show af619251:tutorial/advanced/rocs/egcg/egcg_rl.ipynb` |
+| v2 | `runs_v2_60epochs/executed_egcg_rl_20261020_214646.ipynb` | `a15f87fe` | `git show a15f87fe:…` |
+| v3 | `runs/executed_egcg_rl_20261021_114825.ipynb` | `96b7d4e2` | the file in this directory |
+
+Verified: the committed source at `96b7d4e2` is code-cell-identical to the
+executed v3 notebook, so the `dirty=True` flag in `provenance.json` reflects
+untracked scratch files, not notebook edits.
+
 ### How they differ, and why it matters
 
 **v1 → v2 is a budget change.** v1 used 20 × 256, a 5× reduction of the
@@ -114,6 +130,8 @@ all of the diversity.
 | `egcg_rl.ipynb` | instrumented experiment (source) |
 | `egcg_rl_v3_executed.html` | **v3 results**, open in a browser |
 | `egcg_rl_v2_executed.html` | v2 results |
+| `egcg_rl_v1_executed.html` | v1 results |
+| `runs*/executed_*.ipynb` | the executed notebook for each run, with outputs |
 | `RESULTS.md` | full write-up, all three runs + CPU benchmark |
 | `config_egcg.py` | all parameters, `__file__`-anchored |
 | `build_reference.py` | EGCG → one-conformer SDF, with its gate |

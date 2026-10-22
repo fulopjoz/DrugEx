@@ -11,12 +11,14 @@ runs/*
 !runs/provenance.json
 !runs/*_fit.tsv
 !runs/*_raw.csv.gz
+!runs/executed_*.ipynb
 
 runs_v1_20epochs/*
 !runs_v1_20epochs/comparison.csv
 !runs_v1_20epochs/provenance.json
 !runs_v1_20epochs/*_fit.tsv
 !runs_v1_20epochs/*_raw.csv.gz
+!runs_v1_20epochs/executed_*.ipynb
 
 runs_v2_60epochs/*
 !runs_v2_60epochs/comparison.csv
@@ -24,3 +26,11 @@ runs_v2_60epochs/*
 !runs_v2_60epochs/provenance.json
 !runs_v2_60epochs/*_fit.tsv
 !runs_v2_60epochs/*_raw.csv.gz
+!runs_v2_60epochs/executed_*.ipynb
+
+minimal_out/*
+!minimal_out/executed_*.ipynb
+!minimal_out/comparison.csv
+!minimal_out/*_raw.csv.gz
+!minimal_out/*_fit.tsv
+!minimal_out/*.png
