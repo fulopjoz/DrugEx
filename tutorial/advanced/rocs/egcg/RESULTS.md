@@ -9,7 +9,12 @@ Status: **two production runs complete.**
 - **v1** (job 14053, 20 epochs x 256, n=1,000): shape did **not** improve.
 - **v2** (job 14054, 60 epochs x 512, n=10,000): shape **did** improve,
   robustly — but **uniqueness collapsed to 0.226**, failing the pre-registered
-  diversity bound. Scored as **mode collapse, not success**.
+  diversity bound. Scored as **mode collapse, not success**. Later found to
+  have had **no exploration at all** (`mutate` aliased to `agent`).
+- **v3** (job 14055, same budget, `mutate` = separate frozen prior):
+  **all five pre-registered bounds PASS.** Shape up (+0.0258 median, CI
+  excludes zero) *and* diversity held (uniqueness 0.933). The first clean
+  result.
 
 See Measurements (v1) and Measurements — v2 (below it).
 
@@ -467,3 +472,84 @@ Single seed, descriptive. No causal claim beyond this run.
    figure — it may be a sampling artifact.
 3. Replicate across seeds. A single run cannot separate "more budget improves
    shape" from "this seed found a good basin".
+
+
+---
+
+## Measurements — v3 (exploration fixed)
+
+Job 14055, 64 cores, **19 h 32 m**, exit 0, zero cell errors. `SMOKE_MODE:
+False`, 60 epochs x 512, n=10,000/arm, epsilon 0.2 — identical to v2 except
+`mutate` is now a separate frozen Papyrus instance. **Gate 5 passed**: the
+prior's parameter fingerprint was unchanged by training.
+
+The run took 19 h 32 m against v2's 10 h 44 m, exactly as predicted: with
+exploration working, prior-drawn molecules stay large, and large molecules
+cost more to embed. The longer runtime was evidence the fix was active.
+
+### All five bounds pass
+
+| Quantity | Baseline | v3 reinforced | Δ | v2 for contrast |
+| --- | --- | --- | --- | --- |
+| Median raw TanimotoCombo | 0.6429 | **0.6687** | **+0.0258** | +0.0654 |
+| p90 raw TanimotoCombo | 0.7497 | **0.7973** | +0.0476 | +0.0990 |
+| `desired_ratio` | 0.134 | 0.254 | +0.120 | +0.317 |
+| Median raw SAscore | 2.639 | 2.069 | −0.570 | −1.214 |
+| Validity | 0.955 | 0.969 | +0.014 | +0.035 |
+| **Uniqueness** | 0.955 | **0.933** | **−0.021** | **−0.728** |
+
+Bootstrap 95% CI on the median difference: **[+0.0228, +0.0286]**, excludes
+zero.
+
+| Check | v3 | v2 |
+| --- | --- | --- |
+| Median raw TanimotoCombo increased | PASS | PASS |
+| p90 raw TanimotoCombo increased | PASS | PASS |
+| Median raw SA increase ≤ 0.5 | PASS | PASS |
+| Validity ≥ 0.80 | PASS | PASS |
+| Uniqueness ≥ 0.50 | **PASS (0.933)** | FAIL (0.226) |
+
+### The trade-off is real and was predicted
+
+Fixing exploration cost about **60% of the shape gain** (+0.0258 vs +0.0654)
+and bought back essentially all the diversity (0.933 vs 0.226). This is the
+trade stated in advance: a higher effective epsilon puts prior-drawn sequences
+into the policy-gradient batch, pulling the agent back toward the prior.
+
+### Molecules stayed large
+
+Per-epoch median heavy atoms held at **22–24.5** across all 60 epochs
+(baseline 27), against v2's slide to 18–20. The size drift that dominated v1
+and v2 is largely arrested — the frozen prior keeps re-injecting
+baseline-sized molecules.
+
+### Verdict
+
+With a correctly configured exploration prior, RL against a single EGCG
+reference improves shape similarity **while preserving output diversity**.
+This is the first configuration here to satisfy every pre-registered
+criterion.
+
+Single seed, descriptive; replication across seeds remains the prerequisite to
+any stronger claim.
+
+## CPU scaling — measured, not assumed
+
+Job 14059, 190 cores allocated (PBS confirms `resources_used.ncpus = 190`,
+2 h 37 m CPU in 8 m 39 s wall), scoring the same 64 molecules at
+`MAX_CONFORMERS=30`:
+
+| scorer `n_jobs` | wall (s) | s/molecule | speedup |
+| --- | --- | --- | --- |
+| 16 | 172.5 | 2.696 | 1.00x |
+| 64 | 170.6 | 2.666 | 1.01x |
+| 190 | 171.7 | 2.683 | 1.01x |
+
+**Beyond ~16 workers there is no gain at all.** Conformer generation runs
+serially across molecules in the main process and accounts for roughly 86% of
+the time; only shape/colour alignment uses the pool. Requesting 190 cores for
+this workload wastes 174 of them.
+
+Practical guidance: **16–32 cores is sufficient; 64 is generous; 190 is
+waste.** (`nproc` reported 1 inside the job — a cgroup reporting quirk on this
+cluster, not a real limit; trust `qstat -xf` and the CPU-time ratio instead.)
