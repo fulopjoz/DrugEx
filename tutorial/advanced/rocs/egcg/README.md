@@ -40,6 +40,22 @@ RL settings are **the tutorial's own**: 50 epochs × 500 samples.
 
 Run it: `qsub submit_minimal.sh` (32 cores, ~10 h). Output in `minimal_out/`.
 
+**It reproduces the full experiment.** Job 14060, 9 h 42 m, exit 0, 1,000
+molecules per arm:
+
+| Quantity | before | after | Δ | v3 for comparison |
+|---|---|---|---|---|
+| Median TanimotoCombo | 0.6416 | **0.6681** | **+0.0265** | +0.0258 |
+| p90 TanimotoCombo | 0.7516 | 0.7914 | +0.0398 | +0.0476 |
+| `desired_ratio` | 0.140 | 0.236 | +0.096 | +0.120 |
+| Validity | 0.955 | 0.968 | +0.013 | +0.014 |
+| Uniqueness | 0.955 | **0.967** | **+0.012** | −0.021 |
+
+Bootstrap 95% CI on the median difference **[+0.0192, +0.0356]**, excludes
+zero. The effect matches v3's +0.0258 to within noise, using a tenth of the
+evaluation samples and none of the gating apparatus — so the plain tutorial,
+minimally adapted, is enough to demonstrate the method.
+
 ### `egcg_rl.ipynb` — the instrumented version
 
 Same experiment with the measurement apparatus that produced the evidence
@@ -131,6 +147,7 @@ all of the diversity.
 | `egcg_rl_v3_executed.html` | **v3 results**, open in a browser |
 | `egcg_rl_v2_executed.html` | v2 results |
 | `egcg_rl_v1_executed.html` | v1 results |
+| `egcg_rocs_minimal_executed.html` | **minimal notebook results** |
 | `runs*/executed_*.ipynb` | the executed notebook for each run, with outputs |
 | `RESULTS.md` | full write-up, all three runs + CPU benchmark |
 | `config_egcg.py` | all parameters, `__file__`-anchored |
